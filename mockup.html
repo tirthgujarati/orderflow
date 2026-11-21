@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Order Flow - interface mockup</title>
+<style>
+:root{--bg:#000000;--panel:#000000;--line:#303030;--text:#dbdbdb;--mut:#8c8c8c;--green:#089981;--red:#f23645;--gold:#ff9800;--gap:#222222;--hover:#2e2e2e;--sub:#b8b8b8;--blue:#2962ff}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--text);font:12px/1.3 "Segoe UI",Inter,system-ui,sans-serif;overflow:hidden;height:100%}
+.mono{font-family:Consolas,"JetBrains Mono",ui-monospace,monospace}
+header{height:46px;display:flex;align-items:center;gap:12px;padding:0 12px;border-bottom:1px solid var(--line);background:#000000}
+.logo{font-weight:800;letter-spacing:1.5px;color:var(--gold);font-size:13px}
+.grp{display:flex;gap:5px}
+.chip{padding:4px 9px;border:1px solid var(--line);border-radius:6px;color:var(--mut);background:#000000;white-space:nowrap}
+.chip.on{color:#fff;border-color:#464646;background:#2e2e2e}
+.chip .tag{color:#e0a040;font-size:10px;margin-left:4px}
+.px{font-size:19px;font-weight:700}
+.chg{font-size:12px}
+.sp{flex:1}
+.live{display:flex;align-items:center;gap:6px;color:var(--mut)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green)}
+main{display:grid;grid-template-columns:600px 1fr 300px;gap:4px;background:var(--gap);padding:4px 0;height:calc(100% - 46px - 26px)}
+.col{display:flex;flex-direction:column;min-width:0;background:var(--bg);border-radius:4px;overflow:hidden}
+.ttl{color:var(--sub)!important}
+.ttl{height:24px;flex:none;display:flex;align-items:center;gap:8px;padding:0 9px;color:var(--mut);font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--line);background:var(--panel)}
+.ttl b{color:#c3ccd8;font-weight:600}
+.ttl .r{margin-left:auto;text-transform:none;letter-spacing:0}
+canvas{display:block;width:100%}
+.grow{flex:1;min-height:0}
+footer{height:26px;display:flex;align-items:center;gap:18px;padding:0 12px;border-top:1px solid var(--line);color:var(--mut);font-size:11px;background:#000000}
+footer b{color:var(--text);font-weight:600}
+.g{color:var(--green)}.rd{color:var(--red)}.au{color:var(--gold)}
+/* phone */
+body.phone header{height:54px;gap:8px}
+body.phone .ph-hide{display:none}
+body.phone main{display:block;height:auto}
+.phone-only{display:none}
+body.phone .phone-only{display:flex}
+body.phone .phone-only.stats{display:grid}
+body.phone{width:390px;height:844px;position:relative}
+body.phone nav{position:absolute}
+body.phone .ttl .r{display:none}
+body.phone .logo{font-size:12px}
+.tabs{gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);overflow:hidden}
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:1px;background:var(--line);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.stats div{background:var(--panel);padding:7px 8px}
+.stats small{display:block;color:var(--mut);font-size:10px;text-transform:uppercase;letter-spacing:.6px}
+.stats span{font-size:14px;font-weight:700}
+nav{position:fixed;bottom:0;left:0;right:0;height:58px;border-top:1px solid var(--line);background:#000000;justify-content:space-around;align-items:center}
+nav div{display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--mut);font-size:10.5px}
+nav div.on{color:var(--gold)}
+nav i{font-style:normal;font-size:17px}
+</style></head>
+<body>
+<header>
+  <div class="logo">◆ ORDERFLOW</div>
+  <div class="grp ph-hide">
+    <div class="chip on">XAUUSDT · Binance</div><div class="chip">XAGUSDT · Binance</div><div class="chip">XAUUSDT · Bybit</div><div class="chip">EURUSD · Hyperliquid<span class="tag">thin</span></div>
+  </div>
+  <div class="phone-only" style="flex-direction:column"><b style="font-size:13px">XAUUSDT</b><small style="color:var(--mut)">Binance perp ▾</small></div>
+  <div><span class="px mono" id="hp">3540.12</span> <span class="chg mono" id="hc"></span></div>
+  <div class="grp ph-hide"><div class="chip">1s</div><div class="chip on">1m</div><div class="chip">5m</div><div class="chip">15m</div></div>
+  <div class="grp ph-hide"><div class="chip">$0.10</div><div class="chip on">$0.25</div><div class="chip">$1</div></div>
+  <div class="sp"></div>
+  <div class="live mono"><div class="dot"></div><span id="lv">LIVE · 41 ms · book synced · 0 gaps</span></div>
+</header>
+
+<div class="phone-only tabs"><div class="chip">1s</div><div class="chip on">1m</div><div class="chip">5m</div><div class="chip">$0.25</div><div class="chip">≥ 0.5 oz</div></div>
+
+<main>
+  <section class="col">
+    <div class="ttl"><b>Liquidity heatmap</b> · trades ≥ 0.5 oz · profile 6 min<span class="r mono">book $0.05 rows</span></div>
+    <canvas id="heat" class="grow"></canvas>
+    <div class="ttl"><b>Delta</b> · 10 s bars<span class="r mono" id="dlt"></span></div>
+    <canvas id="delta" style="height:92px"></canvas>
+    <div class="ttl"><b>CVD</b> · since 19:59:00 IST<span class="r mono" id="cvdv"></span></div>
+    <canvas id="cvd" style="height:112px"></canvas>
+  </section>
+  <section class="col ph-hide">
+    <div class="ttl"><b>Footprint</b> · 1m · bucket $0.25 · sell × buy · imbalance ≥ 300%<span class="r">POC <span class="au">▭</span></span></div>
+    <canvas id="fp" class="grow"></canvas>
+  </section>
+  <section class="col ph-hide" style="border-right:0">
+    <div class="ttl"><b>DOM</b> · $0.05 rows<span class="r mono" id="imb"></span></div>
+    <canvas id="dom" style="height:468px"></canvas>
+    <div class="ttl"><b>Time &amp; sales</b> · ≥ 5 oz<span class="r">big ≥ 20 oz</span></div>
+    <canvas id="tape" class="grow"></canvas>
+  </section>
+</main>
+<div class="phone-only stats" id="pstats"></div>
+<footer class="ph-hide" id="foot"></footer>
+<nav class="phone-only"><div class="on"><i>▦</i>Heatmap</div><div><i>▤</i>Footprint</div><div><i>☰</i>DOM</div><div><i>⇅</i>Tape</div></nav>
+
+<script>
+"use strict";
+const PHONE = location.hash === '#phone';
+if (PHONE) document.body.classList.add('phone');
+const G = '#089981', RD = '#f23645', AU = '#ff9800', MUT = '#b8b8b8', LINE = '#303030', TXT = '#dbdbdb', YEL = '#ffeb3b', VG = 'rgba(38,166,154,', VR = 'rgba(239,83,80,';
+
+// ---------------- simulated market (illustration data, follows the measured gold numbers) ----------------
+function rng(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const R = rng(11), gauss = () => { const u = R() || 1e-9, v = R(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); };
+const NS = 360, T0 = Date.UTC(2026,10,20,14,29,0), IST = 5.5*3600e3, LAMBDA = 0.0037;   // $ per oz of net aggression (measured)
+const hhmm = (ms, sec) => { const d = new Date(ms + IST); const f = x => String(x).padStart(2,'0'); return f(d.getUTCHours())+':'+f(d.getUTCMinutes())+(sec?':'+f(d.getUTCSeconds()):''); };
+const bias = s => s < 115 ? 0.24 : s < 200 ? 0.12 : s < 288 ? -0.26 : s < 306 ? -0.35 : 0.10;
+const START = 3540.12, WA = 3542.40;
+let mid = START, sign = 1, wallA = 300;
+const trades = [], mids = new Float64Array(NS), wallRem = new Float64Array(NS), liqs = [];
+for (let s = 0; s < NS; s++) {
+  const sweep = s >= 290 && s < 302;
+  const act = 11 + 7*Math.max(0, Math.sin(s/29)) + (sweep ? 30 : 0);
+  const n = Math.max(2, Math.round(act + gauss()*3));
+  const ts = []; for (let i = 0; i < n; i++) ts.push(R()*1000); ts.sort((a,b) => a-b);
+  for (const ms of ts) {
+    if (R() < 0.3) sign = R() < 0.5 + bias(s) ? 1 : -1;
+    let q = R() < 0.9 ? Math.exp(Math.log(0.09) + 1.35*gauss()) : 2 + Math.pow(R(), -1/1.5)*2.2;
+    if (sweep && sign < 0 && R() < 0.35) { q *= 5; if (R() < 0.25) liqs.push({t: s + ms/1000, p: mid}); }
+    q = Math.max(0.001, Math.min(140, Math.round(q*1000)/1000));
+    let p = Math.round((mid + sign*0.005)*100)/100;
+    let dm = LAMBDA*sign*q + gauss()*0.005;
+    if (sign > 0 && wallA > 0 && s < 228 && mid + dm > WA - 0.02) { wallA -= q; dm = Math.min(dm, WA - 0.02 - mid); p = Math.min(p, WA); }
+    mid += dm;
+    trades.push({t: T0 + s*1000 + ms, p, q, s: sign, sec: s + ms/1000});
+  }
+  mids[s] = mid; wallRem[s] = s < 228 ? Math.max(0, wallA) : 0;
+}
+let lowS = 250; for (let s = 250; s < NS; s++) if (mids[s] < mids[lowS]) lowS = s;
+const WB = Math.round((mids[lowS] - 0.04)/0.05)*0.05;          // the bid wall where the fall stopped
+const SPOOF = Math.round((mids[205] - 0.55)/0.05)*0.05;          // a bid that is pulled before price reaches it
+let spoofEnd = NS; for (let s = 206; s < NS; s++) if (mids[s] < SPOOF + 0.3) { spoofEnd = s; break; }
+
+// book: one column per second, $0.05 rows
+const BIN = 0.05;
+let pmin = Infinity, pmax = -Infinity; for (const m of mids) { pmin = Math.min(pmin, m); pmax = Math.max(pmax, m); }
+const B0 = Math.floor((pmin - 5)/BIN), NB = Math.ceil((pmax + 5)/BIN) - B0;
+const hash = (a, b) => { let h = Math.imul(a, 374761393) ^ Math.imul(b, 668265263); h = Math.imul(h ^ h >>> 13, 1274126177); return ((h ^ h >>> 16) >>> 0)/4294967296*2 - 1; };
+const vnoise = (b, x) => { const i = Math.floor(x), f = x - i, u = f*f*(3-2*f); return hash(b, i)*(1-u) + hash(b, i+1)*u; };
+const book = [];
+for (let s = 0; s < NS; s++) {
+  const col = new Float32Array(NB), m = mids[s];
+  for (let k = 0; k < NB; k++) {
+    const x = (B0 + k)*BIN, d = Math.abs(x - m);
+    if (d < 0.02) continue;
+    let v = (0.5 + 0.45*Math.sqrt(d)) * Math.exp(1.5*vnoise(k, s/70 + k*0.37));
+    if (hash(k, Math.floor((s + k*7)/80)) > 0.94) v += 18 + 30*(hash(k+9, Math.floor((s + k*7)/80))*0.5 + 0.5);   // medium orders resting ~80 s
+    const c = Math.round(x*100);
+    if (c % 100 === 0) v *= 2.6; else if (c % 50 === 0) v *= 1.7;
+    if (Math.abs(x - WA) < 0.026 && x > m) v += wallRem[s];
+    if (Math.abs(x - WB) < 0.026 && s > 165 && x < m + 0.02) v += 230;
+    if (Math.abs(x - SPOOF) < 0.026 && s >= 205 && s < spoofEnd) v += 160;
+    col[k] = v;
+  }
+  book.push(col);
+}
+
+// derived series, all from the same trades
+const secDelta = new Float64Array(NS), secVol = new Float64Array(NS);
+for (const t of trades) { const s = Math.floor(t.sec); secDelta[s] += t.s*t.q; secVol[s] += t.q; }
+const cvd = new Float64Array(NS); { let c = 0; for (let s = 0; s < NS; s++) { c += secDelta[s]; cvd[s] = c; } }
+const totV = secVol.reduce((a,b)=>a+b,0), totD = cvd[NS-1];
+const buyShare = trades.reduce((a,t)=>a+(t.s>0?t.q:0),0)/totV;
+// lambda measured back from the simulated data: regression of 10 s price move on 10 s delta
+{ var X=[],Y=[]; for (let i=1;i<36;i++){ let d=0; for(let s=i*10;s<i*10+10;s++) d+=secDelta[s]; X.push(d); Y.push(mids[i*10+9]-mids[i*10-1]); } }
+const mx = X.reduce((a,b)=>a+b)/X.length, my = Y.reduce((a,b)=>a+b)/Y.length;
+const lamFit = X.reduce((a,x,i)=>a+(x-mx)*(Y[i]-my),0)/X.reduce((a,x)=>a+(x-mx)**2,0);
+const rFit = X.reduce((a,x,i)=>a+(x-mx)*(Y[i]-my),0)/Math.sqrt(X.reduce((a,x)=>a+(x-mx)**2,0)*Y.reduce((a,y)=>a+(y-my)**2,0));
+const last = trades[trades.length-1].p;
+
+// ---------------- helpers ----------------
+function setup(id) {
+  const c = document.getElementById(id), r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  c.width = Math.round(r.width*dpr); c.height = Math.round(r.height*dpr);
+  const x = c.getContext('2d'); x.setTransform(dpr,0,0,dpr,0,0); x.font = '11px Consolas, ui-monospace, monospace'; x.textBaseline = 'middle';
+  return {c, x, w: r.width, h: r.height, dpr};
+}
+const fmtQ = q => q >= 100 ? q.toFixed(0) : q >= 10 ? q.toFixed(1) : q.toFixed(2);
+const fmtV = q => Math.abs(q) >= 1000 ? (q/1000).toFixed(1)+'k' : Math.abs(q) >= 10 ? q.toFixed(0) : q.toFixed(1);
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1),16); return `rgba(${n>>16},${n>>8&255},${n&255},${a})`; };
+function lut() {
+  // TradingView palette shades: black -> blue #0c1d4d, #1d45b3, #2962ff -> orange #ff9800 -> yellow #ffeb3b -> white
+  const st = [[0,[0,0,0]],[0.25,[12,29,77]],[0.5,[29,69,179]],[0.66,[41,98,255]],[0.8,[255,152,0]],[0.92,[255,235,59]],[1,[255,255,255]]];
+  const L = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) { const v = i/255; let j = 0; while (v > st[j+1][0]) j++;
+    const [a, ca] = st[j], [b, cb] = st[j+1], f = (v-a)/(b-a), c = ca.map((x,k)=>Math.round(x+(cb[k]-x)*f));
+    L[i] = (255<<24)|(c[2]<<16)|(c[1]<<8)|c[0]; }
+  return L;
+}
+const LUT = lut();
+function axisRight(x, w, h, lo, hi, step, tagPrice, tagCol) {
+  x.fillStyle = '#000000'; x.fillRect(w-56, 0, 56, h);
+  x.strokeStyle = LINE; x.beginPath(); x.moveTo(w-56.5, 0); x.lineTo(w-56.5, h); x.stroke();
+  x.fillStyle = MUT; x.textAlign = 'left';
+  for (let p = Math.ceil(lo/step)*step; p <= hi; p += step) { const y = (hi-p)/(hi-lo)*h; x.fillText(p.toFixed(2), w-51, y); x.fillRect(w-56, Math.round(y), 3, 1); }
+  if (tagPrice != null) { const y = (hi-tagPrice)/(hi-lo)*h; x.fillStyle = tagCol; x.fillRect(w-56, y-8, 56, 16); x.fillStyle = '#ffffff'; x.font = 'bold 11px Consolas, monospace'; x.fillText(tagPrice.toFixed(2), w-51, y); x.font = '11px Consolas, ui-monospace, monospace'; }
+}
+
+// ---------------- heatmap ----------------
+function drawHeat() {
+  const {c, x, w, h, dpr} = setup('heat');
+  const AX = 56, TB = 18, hw = w - AX, hh = h - TB;
+  const lo = pmin - 1.0, hi = pmax + 1.0;
+  const vals = []; for (let s = 0; s < NS; s += 3) for (let k = 0; k < NB; k += 2) if (book[s][k] > 0) vals.push(book[s][k]);
+  vals.sort((a,b)=>a-b); const cap = Math.log1p(vals[Math.floor(vals.length*0.997)]);
+  const toI = v => Math.min(255, Math.floor(Math.pow(Math.log1p(v)/cap, 1.6)*255));   // gamma keeps ordinary liquidity dark, walls bright
+  const W = Math.round(hw*dpr), H = Math.round(hh*dpr), img = x.createImageData(W, H), px = new Uint32Array(img.data.buffer);
+  for (let yy = 0; yy < H; yy++) {
+    const p = hi - (yy/H)*(hi-lo), k = Math.floor(p/BIN) - B0;
+    for (let xx = 0; xx < W; xx++) {
+      const s = Math.min(NS-1, Math.floor(xx/W*NS)), v = (k >= 0 && k < NB) ? book[s][k] : 0;
+      px[yy*W+xx] = LUT[toI(v)];
+    }
+  }
+  x.putImageData(img, 0, 0);
+  const X = s => s/NS*hw, Y = p => (hi-p)/(hi-lo)*hh;
+  // grid
+  x.strokeStyle = 'rgba(255,255,255,0.05)'; x.lineWidth = 1;
+  for (let m = 1; m < 6; m++) { x.beginPath(); x.moveTo(Math.round(X(m*60))+.5, 0); x.lineTo(Math.round(X(m*60))+.5, hh); x.stroke(); }
+  // volume profile (right edge, $0.10)
+  const vp = new Map(); for (const t of trades) { const k = Math.round(t.p*10); const e = vp.get(k) || [0,0]; e[t.s>0?0:1] += t.q; vp.set(k, e); }
+  let vmax = 0, poc = 0; for (const [k,e] of vp) if (e[0]+e[1] > vmax) { vmax = e[0]+e[1]; poc = k; }
+  const VW = PHONE ? 60 : 92, bh = Math.max(1, 0.1/(hi-lo)*hh - 1);
+  for (const [k,e] of vp) { const y = Y(k/10) - bh/2, lb = e[0]/vmax*VW, ls = e[1]/vmax*VW;
+    x.fillStyle = k === poc ? rgba(AU,.9) : VG + '.5)'; x.fillRect(hw - lb - ls, y, lb, bh);
+    x.fillStyle = k === poc ? rgba(AU,.9) : VR + '.5)'; x.fillRect(hw - ls, y, ls, bh); }
+  // price path
+  x.strokeStyle = 'rgba(255,255,255,0.92)'; x.lineWidth = 1.3; x.beginPath();
+  for (let s = 0; s < NS; s++) { const xx = X(s+0.5), yy = Y(mids[s]); s ? x.lineTo(xx, yy) : x.moveTo(xx, yy); } x.stroke();
+  // trade bubbles: per 2 s, per side, at VWAP
+  const BS = 3, agg = new Map(); for (const t of trades) { const b = Math.floor(t.sec/BS)*BS, key = b*2 + (t.s>0?0:1); const e = agg.get(key) || {q:0,pq:0,s:t.s,sec:b+BS/2}; e.q += t.q; e.pq += t.p*t.q; agg.set(key, e); }
+  const sc = PHONE ? 0.9 : 1.3;
+  for (const e of agg.values()) { if (e.q < 1) continue; const r = Math.min(PHONE ? 12 : 20, 1.5 + sc*Math.sqrt(e.q)), xx = X(e.sec), yy = Y(e.pq/e.q), col = e.s > 0 ? G : RD;
+    x.beginPath(); x.arc(xx, yy, r, 0, 7); x.fillStyle = rgba(col, .42); x.fill(); x.lineWidth = e.q >= 20 ? 1.6 : 1; x.strokeStyle = e.q >= 20 ? '#ffffff' : rgba(col, .95); x.stroke(); }
+  // liquidations
+  x.fillStyle = YEL; for (const l of liqs) { const xx = X(l.t), yy = Y(l.p) + 14; x.beginPath(); x.moveTo(xx, yy-4); x.lineTo(xx+4, yy); x.lineTo(xx, yy+4); x.lineTo(xx-4, yy); x.fill(); }
+  // markers
+  const tag = (s, p, txt, col) => { x.font = 'bold 10px Segoe UI, sans-serif'; const tw = x.measureText(txt).width + 10, xx = Math.min(hw - VW - tw - 4, X(s)), yy = Y(p);
+    x.fillStyle = 'rgba(0,0,0,0.85)'; x.fillRect(xx, yy-8, tw, 16); x.strokeStyle = col; x.strokeRect(xx+.5, yy-7.5, tw-1, 15); x.fillStyle = col; x.textAlign = 'left'; x.fillText(txt, xx+5, yy); x.font = '11px Consolas, ui-monospace, monospace'; };
+  tag(126, WA + 0.32, 'ABSORPTION · sell wall', AU);
+  tag(214, SPOOF - 0.28, 'PULLED bid', '#b8b8b8');
+  tag(Math.max(0, lowS - 70), WB - 0.34, 'SWEEP · liquidations', RD);
+  axisRight(x, w, hh, lo, hi, PHONE ? 1 : 0.5, last, trades[trades.length-1].s > 0 ? G : RD);
+  // time axis
+  x.fillStyle = '#000000'; x.fillRect(0, hh, w, TB); x.fillStyle = MUT; x.textAlign = 'center';
+  for (let m = 0; m <= 6; m++) if (m > 0 && m < 6) x.fillText(hhmm(T0 + m*60000), X(m*60), hh + TB/2);
+}
+
+// ---------------- delta bars & CVD ----------------
+function drawDelta() {
+  const {x, w, h} = setup('delta'), AX = 56, cw = w - AX, n = 36, d = [];
+  for (let i = 0; i < n; i++) { let v = 0; for (let s = i*10; s < i*10+10; s++) v += secDelta[s]; d.push(v); }
+  const mx = Math.max(...d.map(Math.abs)), mid0 = h/2;
+  x.strokeStyle = LINE; x.beginPath(); x.moveTo(0, mid0+.5); x.lineTo(cw, mid0+.5); x.stroke();
+  d.forEach((v, i) => { const bw = cw/n, bh = v/mx*(h/2-6); x.fillStyle = v >= 0 ? G : RD; x.fillRect(i*bw+1.5, v >= 0 ? mid0-bh : mid0, bw-3, Math.abs(bh)); });
+  x.fillStyle = '#000000'; x.fillRect(cw, 0, AX, h); x.fillStyle = MUT; x.textAlign = 'left';
+  x.fillText('+'+fmtV(mx), cw+5, 8); x.fillText('0', cw+5, mid0); x.fillText('−'+fmtV(mx), cw+5, h-8);
+  document.getElementById('dlt').innerHTML = `last 10 s <span class="${d[n-1]>=0?'g':'rd'}">${d[n-1]>=0?'+':'−'}${fmtV(Math.abs(d[n-1]))} oz</span>`;
+}
+function drawCvd() {
+  const {x, w, h} = setup('cvd'), AX = 56, cw = w - AX;
+  let lo = Math.min(0, ...cvd), hi = Math.max(0, ...cvd); const pad = (hi-lo)*0.12; lo -= pad; hi += pad;
+  const X = s => (s+0.5)/NS*cw, Y = v => (hi-v)/(hi-lo)*h;
+  x.strokeStyle = LINE; x.setLineDash([3,3]); x.beginPath(); x.moveTo(0, Y(0)); x.lineTo(cw, Y(0)); x.stroke(); x.setLineDash([]);
+  for (const [col, clip] of [[G, [0, 0, cw, Y(0)]], [RD, [0, Y(0), cw, h]]]) {
+    x.save(); x.beginPath(); x.rect(...clip); x.clip();
+    x.beginPath(); x.moveTo(X(0), Y(0)); for (let s = 0; s < NS; s++) x.lineTo(X(s), Y(cvd[s])); x.lineTo(X(NS-1), Y(0)); x.closePath(); x.fillStyle = rgba(col, .16); x.fill();
+    x.beginPath(); for (let s = 0; s < NS; s++) s ? x.lineTo(X(s), Y(cvd[s])) : x.moveTo(X(s), Y(cvd[s])); x.strokeStyle = col; x.lineWidth = 1.5; x.stroke(); x.restore();
+  }
+  x.fillStyle = '#000000'; x.fillRect(cw, 0, AX, h); x.fillStyle = MUT; x.textAlign = 'left';
+  for (const v of [hi - pad, 0, lo + pad]) x.fillText((v>0?'+':'')+fmtV(v), cw+5, Y(v));
+  const yv = Y(totD); x.fillStyle = totD >= 0 ? G : RD; x.fillRect(cw, yv-8, AX, 16); x.fillStyle = '#ffffff'; x.font = 'bold 11px Consolas, monospace'; x.fillText((totD>0?'+':'')+fmtV(totD), cw+5, yv);
+  document.getElementById('cvdv').innerHTML = `<span class="${totD>=0?'g':'rd'}">${totD>=0?'+':''}${fmtV(totD)} oz</span>`;
+}
+
+// ---------------- footprint ----------------
+function drawFootprint() {
+  const {x, w, h} = setup('fp'), AX = 56, LAB = 62, SUM = 5*19 + 8, BK = 0.25;
+  const cands = [];
+  for (let m = 0; m < 6; m++) {
+    const ts = trades.filter(t => t.sec >= m*60 && t.sec < m*60+60), cells = new Map();
+    let dl = 0, mn = 0, mxd = 0, v = 0;
+    for (const t of ts) { const k = Math.floor(t.p/BK + 1e-9), e = cells.get(k) || [0,0]; e[t.s>0?1:0] += t.q; cells.set(k, e); dl += t.s*t.q; v += t.q; mn = Math.min(mn, dl); mxd = Math.max(mxd, dl); }
+    cands.push({o: ts[0].p, c: ts[ts.length-1].p, hi: Math.max(...ts.map(t=>t.p)), lo: Math.min(...ts.map(t=>t.p)), cells, dl, mn, mx: mxd, v});
+  }
+  const kLo = Math.min(...cands.map(c => Math.floor(c.lo/BK))) - 1, kHi = Math.max(...cands.map(c => Math.floor(c.hi/BK))) + 1;
+  const ch = h - SUM, rows = kHi - kLo + 1, rh = ch/rows, cw = (w - AX - LAB)/6;
+  const lo = kLo*BK, hi = (kHi+1)*BK, Y = p => (hi-p)/(hi-lo)*ch;
+  let cmax = 0; for (const c of cands) for (const e of c.cells.values()) cmax = Math.max(cmax, e[0], e[1]);
+  x.strokeStyle = 'rgba(255,255,255,0.04)'; for (let k = kLo; k <= kHi+1; k++) { const y = Math.round(Y(k*BK))+.5; x.beginPath(); x.moveTo(LAB, y); x.lineTo(w-AX, y); x.stroke(); }
+  const fs = Math.max(8, Math.min(11, rh - 5)); x.font = fs + 'px Consolas, ui-monospace, monospace';
+  let cum = 0;
+  cands.forEach((cd, i) => {
+    const x0 = LAB + i*cw, cx = x0 + 9, cellL = x0 + 18, cellW = (cw - 24)/2;
+    let pk = 0, pv = 0; for (const [k,e] of cd.cells) if (e[0]+e[1] > pv) { pv = e[0]+e[1]; pk = k; }
+    for (const [k, [sv, bv]] of cd.cells) {
+      const y = Y((k+1)*BK) + 1, hh = rh - 2;
+      x.fillStyle = rgba(RD, 0.10 + 0.55*Math.sqrt(sv/cmax)); x.fillRect(cellL, y, cellW - 1, hh);
+      x.fillStyle = rgba(G, 0.10 + 0.55*Math.sqrt(bv/cmax)); x.fillRect(cellL + cellW, y, cellW - 1, hh);
+      const below = cd.cells.get(k-1), above = cd.cells.get(k+1);
+      const buyImb = below && bv >= 3*below[0] && bv >= 3, sellImb = above && sv >= 3*above[1] && sv >= 3;
+      if (sellImb) { x.fillStyle = RD; x.fillRect(cellL, y, cellW - 1, hh); }          // imbalance = solid TradingView red/green cell
+      if (buyImb) { x.fillStyle = G; x.fillRect(cellL + cellW, y, cellW - 1, hh); }
+      x.textAlign = 'right'; x.fillStyle = sellImb ? '#ffffff' : '#dbdbdb'; x.font = (sellImb ? 'bold ' : '') + fs + 'px Consolas, monospace'; x.fillText(fmtQ(sv), cellL + cellW - 5, y + hh/2);
+      x.textAlign = 'left'; x.fillStyle = buyImb ? '#ffffff' : '#dbdbdb'; x.font = (buyImb ? 'bold ' : '') + fs + 'px Consolas, monospace'; x.fillText(fmtQ(bv), cellL + cellW + 4, y + hh/2);
+      if (k === pk) { x.strokeStyle = AU; x.lineWidth = 1.4; x.strokeRect(cellL - .5, y - .5, cellW*2 - .5, hh + 1); x.lineWidth = 1; }
+    }
+    const up = cd.c >= cd.o, col = up ? G : RD;
+    x.strokeStyle = col; x.beginPath(); x.moveTo(cx+.5, Y(cd.hi)); x.lineTo(cx+.5, Y(cd.lo)); x.stroke();
+    x.fillStyle = col; const yb = Y(Math.max(cd.o, cd.c)), yb2 = Y(Math.min(cd.o, cd.c)); x.fillRect(cx-3, yb, 7, Math.max(2, yb2-yb));
+    // summary
+    cum += cd.dl;
+    const vals = [[cd.dl, true], [cd.v, false], [cd.mn, true], [cd.mx, true], [cum, true]];
+    vals.forEach(([v, signed], j) => { const y = ch + 8 + j*19; x.fillStyle = j % 2 ? '#0c0c0c' : '#161616'; x.fillRect(x0 + 1, y, cw - 2, 18);
+      x.fillStyle = signed ? (v >= 0 ? G : RD) : TXT; x.textAlign = 'center'; x.font = '11px Consolas, monospace'; x.fillText((signed && v > 0 ? '+' : '') + fmtV(v), x0 + cw/2, y + 9); });
+    x.fillStyle = MUT; x.textAlign = 'center'; x.font = '10px Segoe UI, sans-serif'; x.fillText(hhmm(T0 + i*60000), x0 + cw/2, 8);
+  });
+  ['Delta','Volume','Min Δ','Max Δ','CVD'].forEach((l, j) => { x.fillStyle = MUT; x.textAlign = 'left'; x.font = '10.5px Segoe UI, sans-serif'; x.fillText(l, 8, ch + 8 + j*19 + 9); });
+  x.strokeStyle = LINE; x.beginPath(); x.moveTo(0, ch + 3.5); x.lineTo(w, ch + 3.5); x.stroke();
+  x.font = '11px Consolas, ui-monospace, monospace'; axisRight(x, w, ch, lo, hi, 0.5, last, trades[trades.length-1].s > 0 ? G : RD);
+  // session profile in the left label column
+  const sp = new Map(); for (const cd of cands) for (const [k,e] of cd.cells) sp.set(k, (sp.get(k)||0) + e[0] + e[1]);
+  const smax = Math.max(...sp.values()); for (const [k,v] of sp) { x.fillStyle = v === smax ? rgba(AU,.8) : 'rgba(120,140,165,0.35)'; x.fillRect(LAB - 4 - v/smax*(LAB-12), Y((k+1)*BK)+1, v/smax*(LAB-12), rh-2); }
+}
+
+// ---------------- DOM ----------------
+function drawDom() {
+  const {x, w, h} = setup('dom'), col = book[NS-1], m = mids[NS-1], N = 13, rowsN = 2*N, HD = 20, rh = (h - HD)/rowsN;
+  const midK = Math.round(m/BIN), recent = new Map();
+  for (const t of trades) if (t.sec >= NS - 60) { const k = Math.round(t.p/BIN), e = recent.get(k) || [0,0]; e[t.s>0?1:0] += t.q; recent.set(k, e); }
+  let bmax = 0; for (let i = -N; i < N; i++) bmax = Math.max(bmax, col[midK + i - B0] || 0);
+  const C = [0, 62, 124, 176, 238, w];   // traded sell | bids | price | asks | traded buy
+  x.fillStyle = MUT; x.font = '10px Segoe UI, sans-serif'; x.textAlign = 'center';
+  ['sold 60s','Bid','Price','Ask','bought 60s'].forEach((l,i) => x.fillText(l, (C[i]+C[i+1])/2, HD/2));
+  x.font = '11px Consolas, monospace'; let bidT = 0, askT = 0;
+  for (let r = 0; r < rowsN; r++) {
+    const k = midK + N - 1 - r, p = k*BIN, v = col[k - B0] || 0, y = HD + r*rh, isAsk = p > m, tr = recent.get(k) || [0,0];
+    if (r < 10 + N - 10 && false) {}
+    x.fillStyle = r % 2 ? '#000000' : '#0c0c0c'; x.fillRect(0, y, w, rh);
+    if (Math.abs(p - m) < BIN) { x.fillStyle = 'rgba(245,196,81,0.10)'; x.fillRect(0, y, w, rh); }
+    const bw = v/bmax*(C[2]-C[1]-6);
+    if (isAsk) { askT += v; x.fillStyle = rgba(RD, .30); x.fillRect(C[3]+2, y+2, bw, rh-4); x.fillStyle = v > 60 ? AU : '#f99ba2'; x.textAlign = 'left'; x.fillText(fmtQ(v), C[3]+6, y+rh/2); }
+    else { bidT += v; x.fillStyle = rgba(G, .30); x.fillRect(C[2]-2-bw, y+2, bw, rh-4); x.fillStyle = v > 60 ? AU : '#84ccc0'; x.textAlign = 'right'; x.fillText(fmtQ(v), C[2]-6, y+rh/2); }
+    x.textAlign = 'center'; x.fillStyle = Math.round(p*100) % 50 === 0 ? '#fff' : '#b8b8b8'; x.fillText(p.toFixed(2), (C[2]+C[3])/2, y+rh/2);
+    if (tr[0] > 0) { x.fillStyle = rgba(RD,.9); x.textAlign = 'right'; x.fillText(fmtQ(tr[0]), C[1]-6, y+rh/2); }
+    if (tr[1] > 0) { x.fillStyle = rgba(G,.9); x.textAlign = 'left'; x.fillText(fmtQ(tr[1]), C[4]+6, y+rh/2); }
+  }
+  x.strokeStyle = LINE; for (const cx of C.slice(1,5)) { x.beginPath(); x.moveTo(cx+.5, HD); x.lineTo(cx+.5, h); x.stroke(); }
+  const imb = (bidT-askT)/(bidT+askT);
+  document.getElementById('imb').innerHTML = `book imbalance <span class="${imb>=0?'g':'rd'}">${imb>=0?'+':''}${(imb*100).toFixed(0)}%</span>`;
+}
+
+// ---------------- tape ----------------
+function drawTape() {
+  const {x, w, h} = setup('tape'), rh = 19, rows = Math.floor(h/rh), list = [];
+  for (let i = trades.length-1; i >= 0 && list.length < rows; i--) if (trades[i].q >= 5) list.push(trades[i]);
+  list.forEach((t, i) => { const y = i*rh, big = t.q >= 20, col = t.s > 0 ? G : RD;
+    x.fillStyle = rgba(col, big ? .26 : .08); x.fillRect(0, y+1, w, rh-2);
+    x.font = (big ? 'bold ' : '') + '11px Consolas, monospace';
+    x.fillStyle = MUT; x.textAlign = 'left'; x.fillText(hhmm(t.t, true), 8, y+rh/2);
+    x.fillStyle = TXT; x.fillText(t.p.toFixed(2), 92, y+rh/2);
+    x.fillStyle = col; x.textAlign = 'right'; x.fillText(fmtQ(t.q) + ' oz', w-46, y+rh/2);
+    x.textAlign = 'left'; x.fillText(t.s > 0 ? 'BUY' : 'SELL', w-40, y+rh/2); });
+}
+
+// ---------------- text parts ----------------
+function texts() {
+  const ch = last - START, up = ch >= 0;
+  document.getElementById('hp').textContent = last.toFixed(2); document.getElementById('hp').style.color = up ? G : RD;
+  document.getElementById('hc').innerHTML = `<span class="${up?'g':'rd'}">${up?'+':''}${ch.toFixed(2)} (${(ch/START*100).toFixed(2)}%)</span>`;
+  document.getElementById('foot').innerHTML =
+    `<span>Session from <b>19:59 IST</b></span><span>trades <b>${trades.length.toLocaleString()}</b></span><span>volume <b>${fmtV(totV)} oz</b></span>` +
+    `<span>delta <b class="${totD>=0?'g':'rd'}">${totD>=0?'+':''}${fmtV(totD)} oz</b></span><span>buy share <b>${(buyShare*100).toFixed(1)}%</b></span>` +
+    `<span>impact λ <b>$${(lamFit*100).toFixed(2)} per 100 oz</b> (r = ${rFit.toFixed(2)}, 10 s bars)</span><span class="sp"></span><span class="au">Mockup · illustration data, not live</span>`;
+  if (PHONE) document.getElementById('pstats').innerHTML =
+    `<div><small>Delta 6m</small><span class="${totD>=0?'g':'rd'}">${totD>=0?'+':''}${fmtV(totD)}</span></div><div><small>Volume</small><span>${fmtV(totV)}</span></div>` +
+    `<div><small>Buy share</small><span>${(buyShare*100).toFixed(0)}%</span></div><div><small>λ /100 oz</small><span>$${(lamFit*100).toFixed(2)}</span></div>`;
+  if (PHONE) document.getElementById('lv').textContent = 'LIVE 41 ms';
+}
+
+if (PHONE) { document.getElementById('heat').style.height = '420px'; document.getElementById('heat').classList.remove('grow'); document.getElementById('delta').style.height = '66px'; document.getElementById('cvd').style.height = '84px'; }
+texts(); drawHeat(); drawDelta(); drawCvd();
+if (!PHONE) { drawFootprint(); drawDom(); drawTape(); }
+</script>
+</body></html>
