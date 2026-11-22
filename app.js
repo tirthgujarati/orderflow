@@ -29,6 +29,24 @@ let session = LS.get('session', 'oanda'); if (!SESSIONS[session]) session = 'oan
 const TF_ROW = { 60000: 0, 300000: 1, 900000: 2, 3600000: 3, 14400000: 4 };
 const rowFor = (m, k2, t) => bucketBy[k2 + '@' + t] || m.buckets[Math.min(m.buckets.length - 1, TF_ROW[t] ?? 1)];
 const bucketBy = LS.get('bucket', {});
+// Automatic row size: about 20 rows in a typical recent candle (median high-low of the last 30 footprint candles), on a
+// round price step that is a whole number of ticks (for 1h/4h also of the day-file row, $0.05 gold / $0.01 silver).
+// Re-checked every 5 minutes; it only changes when the better step differs by more than 1.6x, so it does not flicker.
+// A size picked on the chips overrides it for that market and timeframe; the Auto chip switches back.
+const ROW_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 25000, 50000];
+const gcdI = (a, b) => b ? gcdI(b, a % b) : a;
+const isAuto = () => bucketBy[key + '@' + tf] === undefined;
+let needAuto = true, lastAuto = 0;
+function pickAutoRow(force) {
+  if (!mk || !isAuto()) return;
+  const cs = candles.filter(c => c.cells.length).slice(-30); if (cs.length < 3) return;
+  const r = cs.map(c => c.h - c.l).sort((a, b) => a - b)[cs.length >> 1];
+  const base = tf >= 3600e3 ? mk.buckets.map(b => Math.round(b / tick)).reduce(gcdI, binTicks) : 1;
+  const want = Math.max(base, r / 20), next = ROW_STEPS.find(x => x >= want && x % base === 0) || ROW_STEPS[ROW_STEPS.length - 1];
+  needAuto = false; lastAuto = performance.now();
+  if (next === bucketTicks || (!force && Math.abs(Math.log(next / bucketTicks)) < Math.log(1.6))) return;
+  bucketTicks = next; fv.auto = true; worker.postMessage({ type: 'config', bucket: next * tick }); buildControls(); dirty.add('fp');
+}
 let mk, tick, dp, binTicks, bucketTicks;
 const S = { n: 0, t: new Float64Array(1 << 16), p: new Int32Array(1 << 16), q: new Float64Array(1 << 16), s: new Int8Array(1 << 16), cd: new Float64Array(1 << 16) };
 let cols = []; const MAXCOLS = 6000;                   // 100 ms book columns: last 10 minutes (older comes from the recorder, 1 s)
@@ -61,6 +79,7 @@ function open(k) {
   binTicks = Math.max(1, Math.round(mk.bin / tick)); bucketTicks = Math.max(1, Math.round(rowFor(mk, k, tf) / tick));
   S.n = 0; cols = []; recCols = []; recReq = ''; offHistM = new Map(); offSegs = []; offFn = () => 0; candles = []; cIndex = new Map(); liqs = []; stat = {}; lam = null; th = { bubble: 0, tape: 0, big: 0 };
   hv.center = null; hv.auto = true; hv.live = true; fv.back = 0; fv.auto = true;
+  needAuto = true;
   worker.postMessage({ type: 'open', key: k, tf, session, bucket: bucketTicks * tick });
   buildControls(); all();
 }
@@ -69,8 +88,8 @@ function onMsg(m) {
   if (m.type === 'reset') {
     S.n = 0; const a = m.trades; for (let i = 0; i < a.length; i += 4) pushT(a[i], a[i + 1], a[i + 2], a[i + 3]);
     if (!m.keep) { cols = []; liqs = []; }
-    setCandles(m.candles); updateStats(true); all();
-  } else if (m.type === 'candles') { setCandles(m.candles); dirty.add('fp'); }
+    setCandles(m.candles); updateStats(true); all(); if (needAuto) pickAutoRow(true);
+  } else if (m.type === 'candles') { setCandles(m.candles); dirty.add('fp'); if (needAuto) pickAutoRow(true); }
   else if (m.type === 'prepend') {                                // older history: put in front of what we hold
     const a = m.trades, old = { n: S.n, t: S.t.slice(0, S.n), p: S.p.slice(0, S.n), q: S.q.slice(0, S.n), s: S.s.slice(0, S.n) };
     S.n = 0; for (let i = 0; i < a.length; i += 4) pushT(a[i], a[i + 1], a[i + 2], a[i + 3]);
@@ -398,7 +417,7 @@ function drawFp() {
   x.strokeStyle = C.LINE; x.beginPath(); x.moveTo(0, h - SUMH + 3.5); x.lineTo(w, h - SUMH + 3.5); x.stroke();
   priceAxis(x, w, ch, loT, hiT, pt => Y(pt + 0.5) - TOP, S.n ? S.p[S.n - 1] : null, S.n && S.s[S.n - 1] > 0 ? C.G : C.R, 0);
   if (fv.back >= 1) { x.fillStyle = rgba(C.OR, 0.9); x.textAlign = 'left'; x.font = `11px ${SANS}`; x.fillText(`${Math.round(fv.back)} candles back · ⟲ for latest`, LAB + 6, TOP + 22); }
-  $('fpInfo').textContent = ` · ${fmtSpan(tf)} · 4h like ${SESSIONS[session].label} · row ${(bucketTicks * tick).toFixed(decimals(bucketTicks * tick))}` + (mk.flow ? ` · flow ${mk.flow}` : '');
+  $('fpInfo').textContent = ` · ${fmtSpan(tf)} · 4h like ${SESSIONS[session].label} · row ${(bucketTicks * tick).toFixed(decimals(bucketTicks * tick))}${isAuto() ? ' (auto)' : ''}` + (mk.flow ? ` · flow ${mk.flow}` : '');
 }
 
 // ---------------------------------------------------------------- DOM ladder
@@ -491,14 +510,15 @@ function buildControls() {
   sel.value = key; sel.onchange = () => open(sel.value);
   const tfs = $('tfs'); tfs.innerHTML = '';
   for (const [l, v] of [['1m', 60000], ['5m', 300000], ['15m', 900000], ['1h', 3600000], ['4h', 14400000]]) tfs.appendChild(chip(l, v === tf, () => {
-    tf = v; LS.set('tf', v); fv.back = 0; fv.auto = true; const b = rowFor(mk, key, v); bucketTicks = Math.round(b / tick);
+    tf = v; LS.set('tf', v); fv.back = 0; fv.auto = true; needAuto = true; const b = rowFor(mk, key, v); bucketTicks = Math.round(b / tick);
     worker.postMessage({ type: 'config', tf: v, bucket: b }); buildControls(); }));
   const ss = document.createElement('select'); ss.title = 'Match the 4h candles of your TradingView symbol';
   for (const [k2, s2] of Object.entries(SESSIONS)) { const o = document.createElement('option'); o.value = k2; o.textContent = '4h like ' + s2.label; ss.appendChild(o); }
   ss.value = session; ss.onchange = () => { session = ss.value; LS.set('session', session); worker.postMessage({ type: 'config', session }); buildControls(); };
   tfs.appendChild(ss);
   const bks = $('bks'); bks.innerHTML = '';
-  for (const b of mk.buckets) bks.appendChild(chip(b.toFixed(decimals(b)), Math.round(b / tick) === bucketTicks, () => {
+  bks.appendChild(chip('Auto', isAuto(), () => { delete bucketBy[key + '@' + tf]; LS.set('bucket', bucketBy); needAuto = true; pickAutoRow(true); buildControls(); }));
+  for (const b of mk.buckets) bks.appendChild(chip(b.toFixed(decimals(b)), !isAuto() && Math.round(b / tick) === bucketTicks, () => {
     bucketTicks = Math.round(b / tick); bucketBy[key + '@' + tf] = b; LS.set('bucket', bucketBy); fv.auto = true; worker.postMessage({ type: 'config', bucket: b }); buildControls(); }));
 }
 for (const b of document.querySelectorAll('nav button')) b.onclick = () => {
@@ -546,6 +566,7 @@ let lastHeavy = 0, touched = 0; const HEAVY = new Set(['heat', 'fp']);
 function loop() {
   if (dirty.size && mk) {
     updateStats(); const now = performance.now(), heavyOk = now - lastHeavy >= 250 || now - touched < 300;
+    if (now - lastAuto > 300000) pickAutoRow(false);
     for (const k of [...dirty]) { if (HEAVY.has(k) && !heavyOk) continue; dirty.delete(k); try { draws[k](); } catch (e) { console.error(k, e); } if (HEAVY.has(k)) lastHeavy = now; }
   }
   requestAnimationFrame(loop);
@@ -553,5 +574,5 @@ function loop() {
 ['heat', 'delta', 'cvd', 'fp', 'dom', 'tape'].forEach(setup);
 open(key);
 requestAnimationFrame(loop);
-window.__of = { get state() { return { key, tick, binTicks, bucketTicks, tf, trades: S.n, cols: cols.length, candles: candles.length, stat, th, lam }; } };   // for checking from the console
+window.__of = { get candles() { return candles; }, get state() { return { key, tick, binTicks, bucketTicks, tf, trades: S.n, cols: cols.length, candles: candles.length, stat, th, lam }; } };   // for checking from the console
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
