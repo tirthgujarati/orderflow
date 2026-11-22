@@ -59,6 +59,15 @@ market therefore uses the deepest public gold flow (Binance XAUUSDT perpetual) a
   last spot quote; the header says "spot shut since ..." and the prices are an indication only.
 - The header shows the live spot mid and the offset in use.
 
+## Footprint chart and TradingView
+- Only footprint candles: each candle (TradingView colours) with its footprint beside it; the table underneath shows delta,
+  volume, delta % and CVD per candle.
+- Timeframes 1m, 5m, 15m, 1h, 4h. Candle open times are shown in IST and match TradingView's bars. For 4h choose
+  "4h like": OANDA (OANDA:XAUUSD), FOREX.com / Pepperstone / TVC (18:00 New York session) or Binance (UTC).
+- 1h and 4h footprints use Binance's complete daily trade files for past days (downloaded once, kept on the device) plus
+  today's trades; rows default to $1 (1h) and $2.50 (4h) because single $0.10 levels are venue-specific (VERIFICATION.md).
+- XAUUSD prices use the perp-spot gap of each trade's own minute (Dukascopy spot history, through serve.mjs or the phone app).
+
 ## Controls
 - Market list: Binance (gold, silver, platinum), Bybit (gold, silver, EURUSD, GBPUSD, USDJPY), Hyperliquid
   (gold, silver, EUR, JPY). Markets marked "thin" have little real volume; read their order flow with care.

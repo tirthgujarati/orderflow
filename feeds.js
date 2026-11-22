@@ -152,13 +152,76 @@ const KL = { 60000: '1m', 300000: '5m', 900000: '15m', 3600000: '1h', 14400000: 
 export async function binanceKlines(sym, tfMs, limit = 500) {
   if (!KL[tfMs]) return [];
   const j = await getJSON(`https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=${KL[tfMs]}&limit=${limit}`);
-  return j.map(x => ({ k: Math.floor(x[0] / tfMs), o: +x[1], h: +x[2], l: +x[3], c: +x[4], v: +x[5], d: 2 * +x[9] - +x[5], n: x[8] }));
+  return j.map(x => ({ t: x[0], k: Math.floor(x[0] / tfMs), o: +x[1], h: +x[2], l: +x[3], c: +x[4], v: +x[5], d: 2 * +x[9] - +x[5], n: x[8] }));
+}
+
+// One day of Binance futures trades from data.binance.vision (free daily files, published the next day; ~15 MB zipped for
+// gold). Returns per UTC hour: OHLC, volume, delta, count and volume per price row (row = rowTicks ticks, exchange prices),
+// without keeping the 1 M+ individual trades. Works in browsers/web views and Node 18+ (DecompressionStream).
+export async function binanceDayHours(sym, dayUtcMs, tick, rowTicks, onProgress) {
+  const d = new Date(dayUtcMs).toISOString().slice(0, 10);
+  const r = await fetch(`https://data.binance.vision/data/futures/um/daily/aggTrades/${sym}/${sym}-aggTrades-${d}.zip`);
+  if (r.status === 404) return null;                             // not published yet
+  if (!r.ok) throw new Error(`daily file HTTP ${r.status}`);
+  const zip = new Uint8Array(await r.arrayBuffer()), dv = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+  let e = zip.length - 22; while (e >= 0 && dv.getUint32(e, true) !== 0x06054b50) e--;       // end of central directory
+  if (e < 0) throw new Error('bad zip');
+  const cd = dv.getUint32(e + 16, true), method = dv.getUint16(cd + 10, true), csize = dv.getUint32(cd + 20, true), loc = dv.getUint32(cd + 42, true);
+  const start = loc + 30 + dv.getUint16(loc + 26, true) + dv.getUint16(loc + 28, true);
+  let stream = new Blob([zip.subarray(start, start + csize)]).stream();
+  if (method === 8) stream = stream.pipeThrough(new DecompressionStream('deflate-raw'));
+  const reader = stream.pipeThrough(new TextDecoderStream()).getReader();
+  const hours = new Map(); let rest = '', lines = 0;
+  const one = ln => {
+    const f = ln.split(','); if (f.length < 7 || f[0] === 'agg_trade_id') return;
+    const t = +f[5], p = Math.round(+f[1] / tick), q = +f[2], s = f[6] === 'true' ? -1 : 1, h = Math.floor(t / 3600e3);
+    let o = hours.get(h);
+    if (!o) { o = { h, o: p, hi: p, lo: p, c: p, v: 0, d: 0, n: 0, rows: new Map() }; hours.set(h, o); }
+    if (p > o.hi) o.hi = p; if (p < o.lo) o.lo = p; o.c = p; o.v += q; o.d += s * q; o.n++;
+    const row = Math.floor(p / rowTicks); let x = o.rows.get(row); if (!x) { x = [0, 0]; o.rows.set(row, x); } x[s > 0 ? 1 : 0] += q;
+  };
+  for (;;) {
+    const { value, done } = await reader.read(); if (done) break;
+    const parts = (rest + value).split('\n'); rest = parts.pop();
+    for (const ln of parts) one(ln);
+    lines += parts.length; if (onProgress && lines % 200000 < parts.length) onProgress(lines);
+  }
+  if (rest) one(rest);
+  return [...hours.values()].sort((a, b) => a.h - b.h).map(o => { const cells = new Float64Array(o.rows.size * 3); let i = 0; for (const [row, [s, b]] of o.rows) { cells[i++] = row; cells[i++] = s; cells[i++] = b; } return { h: o.h, o: o.o, hi: o.hi, lo: o.lo, c: o.c, v: o.v, d: o.d, n: o.n, cells }; });
 }
 export async function binancePerpAt(sym, tsMs) {                // close of the 1-minute candle holding tsMs
   const j = await getJSON(`https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=1m&startTime=${Math.floor(tsMs / 60000) * 60000}&limit=1`);
   return j.length ? +j[0][4] : null;
 }
 export async function binanceMid(sym) { const j = await getJSON(`https://fapi.binance.com/fapi/v1/ticker/bookTicker?symbol=${sym}`); return (+j.bidPrice + +j.askPrice) / 2; }
+
+// Binance 1-minute closes of one UTC day: Map minute -> close
+export async function binancePerpMinutes(sym, dayMs) {
+  const j = await getJSON(`https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=1m&startTime=${dayMs}&endTime=${dayMs + 864e5 - 1}&limit=1500`);
+  return new Map(j.map(x => [Math.floor(x[0] / 60000), +x[4]]));
+}
+
+// Spot history: Dukascopy (Swiss bank) free minute candles, one LZMA file per day per side. Through the local server /
+// phone app (proxy /duka, cached) because Dukascopy does not let web pages read it directly. Map minute -> mid close,
+// only minutes that had quotes (volume > 0), so weekends and the daily break are left out.
+export async function spotMinutes(inst, dayMs, proxy) {
+  const { lzmaDecode } = await import('./lzma.js');
+  const d = new Date(dayMs), path = `${inst.replace('/', '')}/${d.getUTCFullYear()}/${String(d.getUTCMonth()).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}`;
+  const side = async s => {
+    const file = `${path}/${s}_candles_min_1.bi5`;
+    const r = await fetch(proxy ? `${proxy}duka?p=${encodeURIComponent(file)}` : `https://datafeed.dukascopy.com/datafeed/${file}`);
+    if (!r.ok) return null;
+    const b = new Uint8Array(await r.arrayBuffer()); if (b.length < 14) return null;
+    const raw = lzmaDecode(b), dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength), out = new Map();
+    for (let o = 0; o + 24 <= raw.length; o += 24) if (dv.getFloat32(o + 20) > 0) out.set(Math.floor(dayMs / 60000) + dv.getUint32(o) / 60, dv.getUint32(o + 8) / 1000);
+    return out;
+  };
+  const bid = await side('BID'); if (!bid) return null;
+  const ask = await side('ASK'); if (!ask) return null;
+  const mid = new Map(); for (const [m, b] of bid) { const a = ask.get(m); if (a !== undefined) mid.set(m, (a + b) / 2); }
+  return mid;
+}
+export const DUKA_PATH = /^[A-Z]{6}\/\d{4}\/\d{2}\/\d{2}\/(BID|ASK)_candles_min_1\.bi5$/;
 
 // ------------------------------------------------------------------------------------------------ Spot XAUUSD / XAGUSD
 // Swissquote (a Swiss bank) publishes its live spot bid/ask. Its server does not allow web pages to read it, so the app

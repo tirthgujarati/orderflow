@@ -5,11 +5,11 @@ export const MARKETS = {
   // Spot XAUUSD / XAGUSD prices (Swissquote live mid) with the order flow of the deepest gold/silver book (Binance futures):
   // every perp price is moved by the live perp-minus-spot gap (rounded to the heatmap row, see engine.js)
   'spot:XAUUSD':      { ex: 'binance', sym: 'XAUUSDT', spot: 'XAU/USD', label: 'XAUUSD (spot)', flow: 'Binance XAUUSDT', unit: 'oz', tick: 0.01, bin: 0.05, buckets: [0.1, 0.25, 0.5, 1, 2.5], bucket: 0.25, axis: 0.5 },
-  'spot:XAGUSD':      { ex: 'binance', sym: 'XAGUSDT', spot: 'XAG/USD', label: 'XAGUSD (spot)', flow: 'Binance XAGUSDT', unit: 'oz', tick: 0.01, bin: 0.01, buckets: [0.01, 0.02, 0.05, 0.1], bucket: 0.02, axis: 0.05 },
-  'binance:XAUUSDT':  { ex: 'binance', sym: 'XAUUSDT', label: 'XAUUSDT · Binance', unit: 'oz',  tick: 0.01,    bin: 0.05,   buckets: [0.1, 0.25, 0.5, 1], bucket: 0.25, axis: 0.5 },
+  'spot:XAGUSD':      { ex: 'binance', sym: 'XAGUSDT', spot: 'XAG/USD', label: 'XAGUSD (spot)', flow: 'Binance XAGUSDT', unit: 'oz', tick: 0.01, bin: 0.01, buckets: [0.01, 0.02, 0.05, 0.1, 0.2], bucket: 0.02, axis: 0.05 },
+  'binance:XAUUSDT':  { ex: 'binance', sym: 'XAUUSDT', label: 'XAUUSDT · Binance', unit: 'oz',  tick: 0.01,    bin: 0.05,   buckets: [0.1, 0.25, 0.5, 1, 2.5], bucket: 0.25, axis: 0.5 },
   'binance:XAGUSDT':  { ex: 'binance', sym: 'XAGUSDT', label: 'XAGUSDT · Binance', unit: 'oz',  tick: 0.01,    bin: 0.01,   buckets: [0.01, 0.02, 0.05, 0.1], bucket: 0.02, axis: 0.05 },
   'binance:XPTUSDT':  { ex: 'binance', sym: 'XPTUSDT', label: 'XPTUSDT · Binance', unit: 'oz',  tick: 0.01,    bin: 0.05,   buckets: [0.1, 0.25, 0.5, 1], bucket: 0.25, axis: 0.5 },
-  'bybit:XAUUSDT':    { ex: 'bybit',   sym: 'XAUUSDT', label: 'XAUUSDT · Bybit',   unit: 'oz',  tick: 0.01,    bin: 0.05,   buckets: [0.1, 0.25, 0.5, 1], bucket: 0.25, axis: 0.5 },
+  'bybit:XAUUSDT':    { ex: 'bybit',   sym: 'XAUUSDT', label: 'XAUUSDT · Bybit',   unit: 'oz',  tick: 0.01,    bin: 0.05,   buckets: [0.1, 0.25, 0.5, 1, 2.5], bucket: 0.25, axis: 0.5 },
   'bybit:XAGUSDT':    { ex: 'bybit',   sym: 'XAGUSDT', label: 'XAGUSDT · Bybit',   unit: 'oz',  tick: 0.01,    bin: 0.01,   buckets: [0.01, 0.02, 0.05, 0.1], bucket: 0.02, axis: 0.05 },
   'bybit:EURUSDUSDT': { ex: 'bybit',   sym: 'EURUSDUSDT', label: 'EURUSD · Bybit', unit: 'EUR', tick: 0.00001, bin: 0.00002, buckets: [0.00005, 0.0001, 0.0002], bucket: 0.0001, axis: 0.0005, thin: true },
   'bybit:GBPUSDUSDT': { ex: 'bybit',   sym: 'GBPUSDUSDT', label: 'GBPUSD · Bybit', unit: 'GBP', tick: 0.00001, bin: 0.00002, buckets: [0.00005, 0.0001, 0.0002], bucket: 0.0001, axis: 0.0005, thin: true },
@@ -78,14 +78,60 @@ export class Trades {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Candle + footprint aggregation. One candle per tf ms; inside it, per price bucket: [sell volume, buy volume].
+// Candle clock matching TradingView. Read from TradingView's own charts on 22 Nov 2026:
+//   OANDA:XAUUSD / XAGUSD                         session 1700-1700 America/New_York -> 4h candles start 17,21,01,05,09,13 NY
+//   FOREXCOM, PEPPERSTONE, CAPITALCOM, FX, TVC    session 1800-1700 America/New_York -> 4h candles start 18,22,02,06,10,14 NY
+//   BINANCE:...                                   24x7 UTC                           -> 4h candles start 00,04,08,... UTC
+// 1m-1h candles are the same everywhere (whole UTC minutes/hours). New York daylight saving is followed automatically.
+export const SESSIONS = { oanda: { label: 'OANDA', hour: 17 }, fx: { label: 'FOREX.com / Pepperstone / TVC', hour: 18 }, utc: { label: 'Binance (UTC)', hour: 0, utc: true } };
+const nyFmt = typeof Intl !== 'undefined' ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' }) : null;
+const nyCache = new Map();
+export function nyOffset(t) {                                     // New York local time minus UTC, in ms (-5 h or -4 h)
+  const h = Math.floor(t / 3600e3); let v = nyCache.get(h);
+  if (v === undefined) {
+    const p = {}; for (const x of nyFmt.formatToParts(new Date(h * 3600e3))) p[x.type] = +x.value;
+    v = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute) - h * 3600e3; nyCache.set(h, v);
+    if (nyCache.size > 20000) nyCache.clear();
+  }
+  return v;
+}
+export function candleClock(tf, session = 'oanda') {
+  const s = SESSIONS[session] || SESSIONS.oanda;
+  if (tf < 4 * 3600e3 || s.utc) return { keyOf: t => Math.floor(t / tf), startOf: k => k * tf };
+  const A = s.hour * 3600e3;
+  return {
+    keyOf: t => Math.floor((t + nyOffset(t) - A) / tf),
+    startOf: k => { const local = k * tf + A; let u = local + 5 * 3600e3; u = local - nyOffset(u); return local - nyOffset(u); },
+  };
+}
+
+// Spot conversion offset (exchange ticks to subtract) at any moment, for XAUUSD/XAGUSD built on the Binance perpetual.
+//   hist: Map minute -> offset, measured afterwards (perp 1m close - Dukascopy spot mid, 15-minute median, rounded to a row)
+//   segs: [{t, off}] live measurements since the page opened (Swissquote spot), each valid until the next
+// When spot was shut (weekend, daily break) the last known value is kept, as the live feed does.
+export function makeOffAt(hist, segs) {
+  const keys = [...hist.keys()].sort((a, b) => a - b);
+  return t => {
+    if (segs.length && t >= segs[0].t) { let lo = 0, hi = segs.length; while (lo < hi) { const m = (lo + hi) >> 1; if (segs[m].t <= t) lo = m + 1; else hi = m; } return segs[lo - 1].off; }
+    const m = Math.floor(t / 60000), v = hist.get(m); if (v !== undefined) return v;
+    // nearest measured minute within 6 hours (spot shut for a while: keep its last value); further away it would be stale
+    let lo = 0, hi = keys.length; while (lo < hi) { const x = (lo + hi) >> 1; if (keys[x] <= m) lo = x + 1; else hi = x; }
+    const before = lo > 0 ? keys[lo - 1] : null, after = lo < keys.length ? keys[lo] : null;
+    const near = before !== null && (after === null || m - before <= after - m) ? before : after;
+    if (near !== null && Math.abs(m - near) <= 360) return hist.get(near);
+    if (before !== null && after === null && segs.length === 0) return hist.get(before);
+    return segs.length ? segs[0].off : (near !== null ? hist.get(near) : 0);
+  };
+}
+
+// Candle + footprint aggregation. One candle per period of the clock; inside it, per price bucket: [sell volume, buy volume].
 export class Candles {
-  constructor(tfMs, bucketTicks) { this.tf = tfMs; this.bk = bucketTicks; this.list = []; this.byKey = new Map(); this.cvd = 0; }
+  constructor(tfMs, bucketTicks, clock) { this.tf = tfMs; this.bk = bucketTicks; this.clock = clock || candleClock(tfMs, 'utc'); this.list = []; this.byKey = new Map(); this.cvd = 0; }
   add(t, p, q, s) {
-    const key = Math.floor(t / this.tf);
+    const key = this.clock.keyOf(t);
     let c = this.byKey.get(key);
     if (!c) {
-      c = { k: key, o: p, h: p, l: p, c: p, v: 0, d: 0, dmin: 0, dmax: 0, n: 0, cvd0: this.cvd, cells: new Map() };
+      c = { k: key, t0: this.clock.startOf(key), o: p, h: p, l: p, c: p, v: 0, d: 0, dmin: 0, dmax: 0, n: 0, cvd0: this.cvd, cells: new Map() };
       this.byKey.set(key, c); this.list.push(c);
       if (this.list.length > 1 && this.list[this.list.length - 2].k > key) { this.list.sort((a, b) => a.k - b.k); }
     }
@@ -97,7 +143,7 @@ export class Candles {
     return c;
   }
   // a plain, transferable copy of one candle for the screen
-  static pack(c) { const cells = []; for (const [b, e] of c.cells) cells.push(b, e[0], e[1]); return { k: c.k, o: c.o, h: c.h, l: c.l, c: c.c, v: c.v, d: c.d, dmin: c.dmin, dmax: c.dmax, n: c.n, cvd: c.cvd0 + c.d, cells }; }
+  static pack(c) { const cells = []; for (const [b, e] of c.cells) cells.push(b, e[0], e[1]); return { k: c.k, t0: c.t0, o: c.o, h: c.h, l: c.l, c: c.c, v: c.v, d: c.d, dmin: c.dmin, dmax: c.dmax, n: c.n, cvd: c.cvd0 + c.d, cells }; }
   trim(maxN) { while (this.list.length > maxN) this.byKey.delete(this.list.shift().k); }
 }
 

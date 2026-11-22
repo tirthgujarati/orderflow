@@ -69,7 +69,8 @@ if (mode === 'offline') {
       const { off, spot } = e.debug();
       ok(spot && Math.abs(off * mk.tick - spot.gap) <= mk.bin, `${key} offset ${(off * mk.tick).toFixed(2)} vs measured perp-spot gap ${spot ? spot.gap.toFixed(3) : '?'} (spot ${spot ? spot.mid.toFixed(3) : '?'}, ${spot && spot.open ? 'market open' : 'market shut, gap at the close'})`);
       const j = await (await fetch(`https://fapi.binance.com/fapi/v1/aggTrades?symbol=${mk.sym}&limit=1`)).json();
-      ok(tr.n > 0, `${key} last shown price ${((tr.p[tr.n - 1]) * mk.tick).toFixed(2)} = perp ${((tr.p[tr.n - 1] + off) * mk.tick).toFixed(2)} - ${(off * mk.tick).toFixed(2)} (perp now ${(+j[0].p).toFixed(2)})`);
+      const { offAt } = e.debug(), lt = tr.t[tr.n - 1], shown = tr.p[tr.n - 1] - offAt(lt);
+      ok(tr.n > 0 && offAt(lt) === off, `${key} last shown price ${(shown * mk.tick).toFixed(2)} = perp ${(tr.p[tr.n - 1] * mk.tick).toFixed(2)} - live offset ${(off * mk.tick).toFixed(2)} (perp now ${(+j[0].p).toFixed(2)})`);
     }
     ok(same / tot >= 0.7, `${key} top-10 book levels equal to REST: ${same}/${tot} (the market moves between the two reads, so a few differences are normal)`);
     const [bb, ba] = book.best();

@@ -8,7 +8,8 @@ import { readFile } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import { extname, join, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SPOT_OK, swissquoteUrl, parseSwissquote } from './feeds.js';
+import { SPOT_OK, swissquoteUrl, parseSwissquote, DUKA_PATH } from './feeds.js';
+import { existsSync, statSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { MARKETS } from './core.js';
 import { createRecorder } from './recorder.mjs';
 
@@ -17,7 +18,7 @@ const args = process.argv.slice(2), ri = args.indexOf('--record');
 const PORT = +(args.find(a => /^\d+$/.test(a)) || process.env.PORT || 8090);
 const RECORD = ri >= 0 ? args[ri + 1].split(',') : ['binance:XAUUSDT', 'binance:XAGUSDT'];
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.css': 'text/css' };
-const ALLOWED = new Set(['index.html', 'app.js', 'engine.js', 'core.js', 'feeds.js', 'sw.js', 'manifest.json', 'icon.svg', 'mockup.html', 'mockup-laptop.png', 'mockup-phone.png']);
+const ALLOWED = new Set(['index.html', 'app.js', 'engine.js', 'core.js', 'feeds.js', 'lzma.js', 'sw.js', 'manifest.json', 'icon.svg', 'mockup.html', 'mockup-laptop.png', 'mockup-phone.png']);
 
 const rec = createRecorder(join(ROOT, 'data', 'rec'));
 for (const k of RECORD) if (MARKETS[k]) rec.start(k);
@@ -29,6 +30,27 @@ async function spot(inst) {
   const c = spotCache.get(inst); if (c && Date.now() - c.at < 500) return c.q;
   const q = parseSwissquote(await (await fetch(swissquoteUrl(inst), { signal: AbortSignal.timeout(4000) })).json());
   spotCache.set(inst, { at: Date.now(), q }); return q;
+}
+// /duka?p=XAUUSD/2026/10/20/BID_candles_min_1.bi5 -> Dukascopy spot history file (fetched here: Dukascopy does not let web
+// pages read it). Cached in data/duka; finished days are kept, today is refreshed after 10 minutes. One request at a time,
+// 1.5 s apart, with retries: Dukascopy blocks clients that ask too fast.
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let dukaChain = Promise.resolve();
+function duka(p) {
+  const file = join(ROOT, 'data', 'duka', p.replace(/\//g, '_')), m = /(\d{4})\/(\d{2})\/(\d{2})/.exec(p);
+  const done = Date.UTC(+m[1], +m[2], +m[3]) + 864e5 + 3 * 3600e3 < Date.now();
+  if (existsSync(file) && (done || Date.now() - statSync(file).mtimeMs < 600000)) return Promise.resolve(readFileSync(file));
+  const run = async () => {
+    for (let i = 0; i < 5; i++) {
+      const r = await fetch('https://datafeed.dukascopy.com/datafeed/' + p, { headers: { 'user-agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(20000) }).catch(() => null);
+      if (r && r.ok) { const b = Buffer.from(await r.arrayBuffer()); mkdirSync(join(ROOT, 'data', 'duka'), { recursive: true }); writeFileSync(file, b); return b; }
+      if (r && r.status === 404) return null;
+      await sleep(10000 * 2 ** i);
+    }
+    if (existsSync(file)) return readFileSync(file);
+    throw new Error('Dukascopy not reachable');
+  };
+  const job = dukaChain.then(run); dukaChain = job.catch(() => {}).then(() => sleep(3000)); return job;
 }
 const send = (res, code, body, type = 'application/json') => { res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' }); res.end(body); };
 
@@ -45,6 +67,11 @@ createServer(async (req, res) => {
     for await (const c of req) chunks.push(c);
     const { mkdirSync, writeFileSync } = await import('node:fs'); mkdirSync(join(ROOT, 'data'), { recursive: true });
     writeFileSync(join(ROOT, 'data', `snap-${name}.png`), Buffer.concat(chunks)); return send(res, 200, 'saved', 'text/plain');
+  }
+  if (url.pathname === '/duka') {
+    const p = q.get('p'); if (!p || !DUKA_PATH.test(p)) return send(res, 400, 'bad path', 'text/plain');
+    try { const b = await duka(p); return b ? send(res, 200, b, 'application/octet-stream') : send(res, 404, 'none', 'text/plain'); }
+    catch (e) { return send(res, 502, e.message, 'text/plain'); }
   }
   if (url.pathname.startsWith('/rec/')) {
     const key = q.get('key');

@@ -72,6 +72,13 @@ final class LocalServer extends Thread {
             catch (Exception e) { send(out, 502, "application/json", new JSONObject().put("error", String.valueOf(e.getMessage())).toString().getBytes()); }
             return;
         }
+        if (path.equals("/duka")) {
+            String p = q.get("p");
+            if (!Duka.validPath(p)) { send(out, 400, "text/plain", "bad path".getBytes()); return; }
+            try { byte[] b = Duka.get(ctx, p); if (b == null) send(out, 404, "text/plain", "none".getBytes()); else send(out, 200, "application/octet-stream", b); }
+            catch (Exception e) { send(out, 502, "text/plain", String.valueOf(e.getMessage()).getBytes()); }
+            return;
+        }
         if (path.startsWith("/rec/")) {
             if (path.equals("/rec/info")) {
                 JSONArray a = new JSONArray();

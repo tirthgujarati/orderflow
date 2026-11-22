@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Candles + footprint - example</title>
+<style>
+:root{--bg:#000;--gap:#222;--line:#303030;--text:#dbdbdb;--sub:#b8b8b8;--mut:#8c8c8c;--green:#089981;--red:#f23645;--orange:#ff9800}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1600px;height:900px;background:var(--gap);color:var(--text);font:12px/1.3 "Segoe UI",Inter,system-ui,sans-serif;overflow:hidden}
+header{height:44px;display:flex;align-items:center;gap:10px;padding:0 12px;background:var(--bg)}
+.logo{font-weight:800;letter-spacing:1.5px;color:var(--orange);font-size:13px}
+.chip{padding:4px 9px;border:1px solid var(--line);border-radius:6px;color:var(--sub)}
+.chip.on{color:#fff;border-color:#464646;background:#2e2e2e}
+.px{font:700 19px Consolas,monospace}
+section{background:var(--bg);border-radius:4px;margin-top:4px;position:relative}
+.ttl{height:24px;display:flex;align-items:center;gap:8px;padding:0 10px;color:var(--sub);font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--line)}
+.ttl b{color:var(--text)} .ttl .r{margin-left:auto;text-transform:none;letter-spacing:0}
+canvas{display:block}
+.note{position:absolute;right:12px;bottom:6px;color:var(--orange);font-size:11px}
+</style>
+<script src="fp-data.js"></script>
+</head><body>
+<header>
+  <div class="logo">◆ ORDERFLOW</div>
+  <div class="chip on">XAUUSD (spot)</div>
+  <div class="px" id="px"></div>
+  <div style="flex:1;text-align:center;color:#ff9800;font-size:11px">Example from real Binance gold trades (21 Nov 2026), in XAUUSD prices · wheel / pinch zooms between the two views</div>
+  <div class="chip">1m</div><div class="chip on">5m</div><div class="chip">15m</div><div class="chip">1h</div><div class="chip">4h</div>
+  <div style="width:10px"></div>
+  <div class="chip on">Candles + footprint</div><div class="chip">Heatmap</div>
+</header>
+<section><div class="ttl"><b>Zoomed out</b> · 5 min candles, like TradingView · volume underneath<span class="r" id="t1"></span></div><canvas id="c1"></canvas></section>
+<section><div class="ttl"><b>Zoomed in</b> · the same candles, each with its footprint beside it · sell × buy per price row<span class="r">imbalance ≥ 300% = solid cell · <span style="color:#ff9800">▭</span> POC = most traded row</span></div><canvas id="c2"></canvas>
+</section>
+<script>
+const C = { G: '#089981', R: '#f23645', OR: '#ff9800', TXT: '#dbdbdb', SUB: '#b8b8b8', MUT: '#8c8c8c', LINE: '#303030', VG: 'rgba(38,166,154,0.5)', VR: 'rgba(239,83,80,0.5)' };
+const rgba = (h, a) => { const n = parseInt(h.slice(1), 16); return `rgba(${n >> 16},${n >> 8 & 255},${n & 255},${a})`; };
+const MONO = 'Consolas, "JetBrains Mono", monospace', SANS = '"Segoe UI", sans-serif', IST = 5.5 * 3600e3;
+const hm = t => { const d = new Date(t + IST), f = x => String(x).padStart(2, '0'); return f(d.getUTCHours()) + ':' + f(d.getUTCMinutes()); };
+const fQ = q => q >= 100 ? q.toFixed(0) : q >= 10 ? q.toFixed(1) : q.toFixed(2);
+const fS = v => (v > 0 ? '+' : v < 0 ? '−' : '') + (Math.abs(v) >= 1000 ? (Math.abs(v) / 1000).toFixed(1) + 'k' : Math.abs(v) >= 10 ? Math.abs(v).toFixed(0) : Math.abs(v).toFixed(1));
+const { T, P, Q, S } = window.FP, TF = 300000;
+// ---- candles with footprint cells, from the real trades
+function build(bk) {
+  const list = [], by = new Map(); let cvd = 0;
+  for (let i = 0; i < T.length; i++) {
+    const k = Math.floor(T[i] / TF); let c = by.get(k);
+    if (!c) { c = { k, o: P[i], h: P[i], l: P[i], c: P[i], v: 0, d: 0, cells: new Map() }; by.set(k, c); list.push(c); }
+    if (P[i] > c.h) c.h = P[i]; if (P[i] < c.l) c.l = P[i]; c.c = P[i]; c.v += Q[i]; c.d += S[i] * Q[i]; cvd += S[i] * Q[i]; c.cvd = cvd;
+    const b = Math.floor(P[i] / bk), e = c.cells.get(b) || [0, 0]; e[S[i] > 0 ? 1 : 0] += Q[i]; c.cells.set(b, e);
+  }
+  return list;
+}
+function setup(id, w, h) { const c = document.getElementById(id); c.width = w * 2; c.height = h * 2; c.style.width = w + 'px'; c.style.height = h + 'px'; const x = c.getContext('2d'); x.scale(2, 2); x.textBaseline = 'middle'; x.fillStyle = '#000'; x.fillRect(0, 0, w, h); return x; }
+function axis(x, w, h, lo, hi, Y, step, last, top = 0) {
+  const AX = 64; x.fillStyle = '#000'; x.fillRect(w - AX, 0, AX, h + top); x.strokeStyle = C.LINE; x.beginPath(); x.moveTo(w - AX + .5, 0); x.lineTo(w - AX + .5, h + top); x.stroke();
+  x.fillStyle = C.SUB; x.font = `11px ${MONO}`; x.textAlign = 'left';
+  for (let p = Math.ceil(lo / step) * step; p <= hi; p += step) { const y = Y(p); if (y > top + 6 && y < top + h - 6) x.fillText((p / 100).toFixed(2), w - AX + 6, y); }
+  const y = Y(last.p); x.fillStyle = last.up ? C.G : C.R; x.fillRect(w - AX, y - 8, AX, 16); x.fillStyle = '#fff'; x.font = `bold 11px ${MONO}`; x.fillText((last.p / 100).toFixed(2), w - AX + 6, y);
+}
+const last = { p: P[P.length - 1], up: S[S.length - 1] > 0 };
+document.getElementById('px').textContent = (last.p / 100).toFixed(2); document.getElementById('px').style.color = last.up ? C.G : C.R;
+
+// ---- panel 1: zoomed out, plain candles + volume
+(function () {
+  const W = 1600, H = 300, AX = 64, VOLH = 60, TB = 18, x = setup('c1', W, H), cs = build(25), pw = W - AX, ph = H - TB - VOLH - 6;
+  const n = cs.length, cw = pw / n, lo = Math.min(...cs.map(c => c.l)) - 20, hi = Math.max(...cs.map(c => c.h)) + 20;
+  const Y = p => 6 + (hi - p) / (hi - lo) * ph;
+  x.strokeStyle = 'rgba(242,242,242,0.06)'; for (let p = Math.ceil(lo / 200) * 200; p < hi; p += 200) { x.beginPath(); x.moveTo(0, Math.round(Y(p)) + .5); x.lineTo(pw, Math.round(Y(p)) + .5); x.stroke(); }
+  const vmax = Math.max(...cs.map(c => c.v));
+  cs.forEach((c, i) => {
+    const cx = i * cw + cw / 2, col = c.c >= c.o ? C.G : C.R;
+    x.strokeStyle = col; x.beginPath(); x.moveTo(Math.round(cx) + .5, Y(c.h)); x.lineTo(Math.round(cx) + .5, Y(c.l)); x.stroke();
+    x.fillStyle = col; const y1 = Y(Math.max(c.o, c.c)), y2 = Y(Math.min(c.o, c.c)); x.fillRect(cx - cw * 0.35, y1, cw * 0.7, Math.max(1, y2 - y1));
+    const vh = c.v / vmax * VOLH; x.fillStyle = c.c >= c.o ? C.VG : C.VR; x.fillRect(cx - cw * 0.35, H - TB - vh, cw * 0.7, vh);
+  });
+  // bracket over the candles shown zoomed in below
+  const x0 = (n - 6) * cw; x.strokeStyle = rgba(C.OR, 0.9); x.setLineDash([4, 3]); x.strokeRect(x0 + 1, 4, 6 * cw - 2, H - TB - 6); x.setLineDash([]);
+  x.fillStyle = C.OR; x.font = `11px ${SANS}`; x.textAlign = 'right'; x.fillText('shown zoomed in below ▼', x0 - 6, 14);
+  axis(x, W, H - TB, lo, hi, Y, 200, last);
+  x.fillStyle = '#000'; x.fillRect(0, H - TB, W, TB); x.fillStyle = C.SUB; x.font = `10.5px ${MONO}`; x.textAlign = 'center';
+  cs.forEach((c, i) => { if (c.k % 6 === 0) x.fillText(hm(c.k * TF), i * cw + cw / 2, H - TB / 2); });
+  document.getElementById('t1').textContent = `${hm(cs[0].k * TF)} – ${hm((cs[n - 1].k + 1) * TF)} IST · ${n} candles`;
+})();
+
+// ---- panel 2: zoomed in, each candle with its footprint
+(function () {
+  const W = 1600, H = 900 - 44 - 4 - 300 - 24 - 4 - 24, AX = 64, LAB = 60, TOP = 20, SUMH = 4 * 19 + 26, x = setup('c2', W, H);
+  // bucket: the smallest of $0.10 / $0.25 / $0.50 / $1 that keeps rows readable
+  let bk = 25, vis;
+  for (const b of [10, 25, 50, 100]) { bk = b; vis = build(b).slice(-6); const rows = (Math.max(...vis.map(c => c.h)) - Math.min(...vis.map(c => c.l))) / b; if (rows <= 34) break; }
+  const pw = W - AX - LAB, cw = pw / vis.length, ch = H - TOP - SUMH;
+  const lo = (Math.floor(Math.min(...vis.map(c => c.l)) / bk) - 1) * bk, hi = (Math.floor(Math.max(...vis.map(c => c.h)) / bk) + 2) * bk;
+  const Y = p => TOP + (hi - p) / (hi - lo) * ch, rowPx = bk / (hi - lo) * ch, fs = Math.max(9, Math.min(13, rowPx - 4));
+  let cmax = 0; for (const c of vis) for (const e of c.cells.values()) cmax = Math.max(cmax, e[0], e[1]);
+  // row grid
+  x.strokeStyle = 'rgba(242,242,242,0.05)'; for (let p = lo; p <= hi; p += bk) { const y = Math.round(Y(p)) + .5; x.beginPath(); x.moveTo(LAB, y); x.lineTo(W - AX, y); x.stroke(); }
+  // session profile at the left
+  const sp = new Map(); for (const c of vis) for (const [b, e] of c.cells) sp.set(b, (sp.get(b) || 0) + e[0] + e[1]);
+  const smax = Math.max(...sp.values()); let spoc = 0; for (const [b, v] of sp) if (v === smax) spoc = b;
+  for (const [b, v] of sp) { const lw = v / smax * (LAB - 10); x.fillStyle = b === spoc ? rgba(C.OR, .85) : 'rgba(184,184,184,0.28)'; x.fillRect(LAB - 4 - lw, Y((b + 1) * bk) + 1, lw, rowPx - 2); }
+  vis.forEach((c, i) => {
+    const x0 = LAB + i * cw, CW = 30, cx = x0 + 6 + CW / 2, cellL = x0 + CW + 12, cellW = (cw - CW - 22) / 2;
+    // the candle itself (TradingView style), full height of its range
+    const col = c.c >= c.o ? C.G : C.R, y1 = Y(Math.max(c.o, c.c) + 1), y2 = Y(Math.min(c.o, c.c));
+    x.strokeStyle = col; x.lineWidth = 1.5; x.beginPath(); x.moveTo(cx, Y(c.h + 1)); x.lineTo(cx, Y(c.l)); x.stroke(); x.lineWidth = 1;
+    x.fillStyle = col; x.fillRect(cx - CW / 2 + 4, y1, CW - 8, Math.max(2, y2 - y1));
+    // footprint cells
+    let cm = 0, pk = 0, pv = 0; for (const [b, e] of c.cells) { cm = Math.max(cm, e[0], e[1]); if (e[0] + e[1] > pv) { pv = e[0] + e[1]; pk = b; } }
+    const keys = [...c.cells.keys()], kmin = Math.min(...keys), kmax = Math.max(...keys);
+    for (const [b, [sv, bv]] of c.cells) {
+      const y = Y((b + 1) * bk) + 1, hh = rowPx - 2;
+      const below = b > kmin ? (c.cells.get(b - 1) || [0, 0])[0] : null, above = b < kmax ? (c.cells.get(b + 1) || [0, 0])[1] : null;
+      const bi = below !== null && bv >= 0.1 * cm && bv >= 3 * below, si = above !== null && sv >= 0.1 * cm && sv >= 3 * above;
+      x.fillStyle = si ? C.R : rgba(C.R, 0.1 + 0.55 * Math.sqrt(sv / cmax)); x.fillRect(cellL, y, cellW - 1, hh);
+      x.fillStyle = bi ? C.G : rgba(C.G, 0.1 + 0.55 * Math.sqrt(bv / cmax)); x.fillRect(cellL + cellW, y, cellW - 1, hh);
+      x.font = `${si ? 'bold ' : ''}${fs}px ${MONO}`; x.textAlign = 'right'; x.fillStyle = si ? '#fff' : C.TXT; x.fillText(fQ(sv), cellL + cellW - 5, y + hh / 2);
+      x.font = `${bi ? 'bold ' : ''}${fs}px ${MONO}`; x.textAlign = 'left'; x.fillStyle = bi ? '#fff' : C.TXT; x.fillText(fQ(bv), cellL + cellW + 4, y + hh / 2);
+      if (b === pk) { x.strokeStyle = C.OR; x.lineWidth = 1.6; x.strokeRect(cellL - .5, y - .5, cellW * 2 - .5, hh + 1); x.lineWidth = 1; }
+    }
+    // candle separators and time
+    x.strokeStyle = C.LINE; x.beginPath(); x.moveTo(Math.round(x0 + cw) + .5, TOP); x.lineTo(Math.round(x0 + cw) + .5, H - SUMH + 4); x.stroke();
+    x.fillStyle = C.SUB; x.font = `11px ${SANS}`; x.textAlign = 'center'; x.fillText(hm(c.k * TF) + ' IST', x0 + cw / 2, 10);
+    // summary rows
+    [['Delta', c.d, 1], ['Volume', c.v, 0], ['Delta %', c.d / c.v * 100, 2], ['CVD', c.cvd, 1]].forEach(([, v, kind], j) => {
+      const y = H - SUMH + 12 + j * 19; x.fillStyle = j % 2 ? '#0c0c0c' : '#161616'; x.fillRect(x0 + 1, y, cw - 2, 18);
+      x.font = `12px ${MONO}`; x.textAlign = 'center';
+      x.fillStyle = kind ? (v >= 0 ? C.G : C.R) : C.TXT; x.fillText(kind === 2 ? (v > 0 ? '+' : '') + v.toFixed(1) + '%' : kind ? fS(v) : fQ(v) + ' oz', x0 + cw / 2, y + 9);
+    });
+  });
+  ['Delta', 'Volume', 'Delta %', 'CVD'].forEach((l, j) => { x.fillStyle = C.SUB; x.font = `11px ${SANS}`; x.textAlign = 'left'; x.fillText(l, 6, H - SUMH + 12 + j * 19 + 9); });
+  x.strokeStyle = C.LINE; x.beginPath(); x.moveTo(0, H - SUMH + 6.5); x.lineTo(W, H - SUMH + 6.5); x.stroke();
+  // last price line
+  const yl = Math.round(Y(last.p + 0.5)) + .5; x.strokeStyle = 'rgba(255,255,255,0.35)'; x.setLineDash([2, 3]); x.beginPath(); x.moveTo(LAB, yl); x.lineTo(W - AX, yl); x.stroke(); x.setLineDash([]);
+  axis(x, W, H - SUMH, lo, hi, p => Y(p + 0.5), bk * 2, last);
+  x.fillStyle = C.SUB; x.font = `10.5px ${SANS}`; x.textAlign = 'left'; x.fillText(`row = $${(bk / 100).toFixed(2)}`, 6, 10);
+})();
+</script>
+</body></html>

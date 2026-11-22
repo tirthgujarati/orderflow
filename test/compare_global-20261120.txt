@@ -1,0 +1,31 @@
+loaded: Binance 1,135,007 trades, Bybit 297,257 trades, Dukascopy 814,240 spot ticks, TradingView OANDA 252 x 5m, COMEX 1259 x 1m
+
+== 1. Price: our candles vs real XAUUSD (Dukascopy spot, TradingView OANDA) and COMEX
+perp - spot gap over the day: median 5.96, 5-95% range 5.35 .. 7.24  (this is the offset the app subtracts)
+TradingView OANDA 5m: 251 candles. typical difference (median): open $0.08, high $0.17, low $0.20, close $0.15; 90% within close $0.39; same candle colour 99%
+Dukascopy spot 5m: 251 candles. typical difference (median): open $0.03, high $0.18, low $0.20, close $0.12; 90% within close $0.39; same candle colour 98%
+Binance vs TradingView OANDA (5m): correlation of candle-to-candle moves 0.998 over 251 candles
+Binance vs Dukascopy spot (1m): correlation of candle-to-candle moves 0.996 over 1259 candles
+Binance vs COMEX futures (1m): correlation of candle-to-candle moves 0.993 over 1257 candles
+Binance vs COMEX futures (5m): correlation of candle-to-candle moves 0.998 over 251 candles
+TradingView OANDA vs COMEX (5m): correlation of candle-to-candle moves 0.999 over 251 candles
+
+== 2. Volume: is Binance busy when the world is busy?
+Binance vs COMEX (5m volume, log scale): correlation 0.807  (252 candles)
+Binance vs Bybit (5m volume, log scale): correlation 0.778  (252 candles)
+Binance vs OANDA tick count (5m volume, log scale): correlation 0.700  (252 candles)
+size: Binance 1,461,005 oz vs COMEX 306,892 contracts (x100 oz = 30,689,200 oz): Binance = 4.8% of COMEX ounces
+
+== 3. Delta (who is aggressive): does Binance flow agree with other markets?
+Binance delta vs Bybit delta (1m): correlation 0.374, same sign 61%  (1260 candles)
+Binance delta vs Bybit delta (5m): correlation 0.435, same sign 61%  (252 candles)
+Binance delta vs Bybit delta (1h): correlation 0.500, same sign 48%  (21 candles)
+Binance delta vs COMEX futures candle move (1m): correlation 0.496, delta sign = candle colour 71%
+Binance delta vs Dukascopy spot candle move (1m): correlation 0.500, delta sign = candle colour 71%
+Binance delta vs COMEX futures candle move (5m): correlation 0.561, delta sign = candle colour 71%
+Binance delta vs TradingView OANDA candle move (5m): correlation 0.559, delta sign = candle colour 71%
+
+== 4. Footprint levels: do the busiest prices agree?
+POC (most traded $0.10 row) Binance vs Bybit, per hour: median distance $5.80, within $0.50 in 14% of hours
+POC Binance (shifted to spot) vs Dukascopy spot activity, per hour: median distance $3.70, within $0.50 in 19% of hours
+volume-at-price shape, Binance vs spot activity, per hour: median correlation 0.60

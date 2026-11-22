@@ -1,5 +1,5 @@
 // Screen thread: receives 100 ms frames from the engine worker and draws every panel on canvas, only when something changed.
-import { MARKETS, decimals, imbalances, poc, valueArea, quantile, impact } from './core.js';
+import { MARKETS, SESSIONS, decimals, imbalances, poc, valueArea, quantile, impact, makeOffAt } from './core.js';
 
 // ---------------------------------------------------------------- colours (TradingView dark theme)
 const C = { G: '#089981', R: '#f23645', OR: '#ff9800', YEL: '#ffeb3b', BLUE: '#2962ff', TXT: '#dbdbdb', SUB: '#b8b8b8', MUT: '#8c8c8c', LINE: '#303030', BG: '#000000', VG: 'rgba(38,166,154,0.5)', VR: 'rgba(239,83,80,0.5)' };
@@ -23,7 +23,11 @@ const LUT = (() => {
 
 // ---------------------------------------------------------------- state
 let key = LS.get('key', 'spot:XAUUSD'); if (!MARKETS[key]) key = 'spot:XAUUSD';
-let tf = LS.get('tf', 60000);
+let tf = LS.get('tf', 300000); if (![60000, 300000, 900000, 3600000, 14400000].includes(tf)) tf = 300000;
+let session = LS.get('session', 'oanda'); if (!SESSIONS[session]) session = 'oanda';
+// row size per candle size: from the market's list, bigger rows for bigger candles (1h/4h use $0.50-$1+ rows, see VERIFICATION.md)
+const TF_ROW = { 60000: 0, 300000: 1, 900000: 2, 3600000: 3, 14400000: 4 };
+const rowFor = (m, k2, t) => bucketBy[k2 + '@' + t] || m.buckets[Math.min(m.buckets.length - 1, TF_ROW[t] ?? 1)];
 const bucketBy = LS.get('bucket', {});
 let mk, tick, dp, binTicks, bucketTicks;
 const S = { n: 0, t: new Float64Array(1 << 16), p: new Int32Array(1 << 16), q: new Float64Array(1 << 16), s: new Int8Array(1 << 16), cd: new Float64Array(1 << 16) };
@@ -54,10 +58,10 @@ worker.onerror = e => { stat = { conn: 'engine error: ' + (e.message || 'worker 
 
 function open(k) {
   key = k; LS.set('key', k); mk = MARKETS[k]; tick = mk.tick; dp = decimals(tick);
-  binTicks = Math.max(1, Math.round(mk.bin / tick)); bucketTicks = Math.max(1, Math.round((bucketBy[k] || mk.bucket) / tick));
-  S.n = 0; cols = []; recCols = []; recReq = ''; candles = []; cIndex = new Map(); liqs = []; stat = {}; lam = null; th = { bubble: 0, tape: 0, big: 0 };
+  binTicks = Math.max(1, Math.round(mk.bin / tick)); bucketTicks = Math.max(1, Math.round(rowFor(mk, k, tf) / tick));
+  S.n = 0; cols = []; recCols = []; recReq = ''; offHistM = new Map(); offSegs = []; offFn = () => 0; candles = []; cIndex = new Map(); liqs = []; stat = {}; lam = null; th = { bubble: 0, tape: 0, big: 0 };
   hv.center = null; hv.auto = true; hv.live = true; fv.back = 0; fv.auto = true;
-  worker.postMessage({ type: 'open', key: k, tf, bucket: bucketTicks * tick });
+  worker.postMessage({ type: 'open', key: k, tf, session, bucket: bucketTicks * tick });
   buildControls(); all();
 }
 function setCandles(list) { candles = list; cIndex = new Map(list.map((c, i) => [c.k, i])); }
@@ -72,12 +76,10 @@ function onMsg(m) {
     S.n = 0; for (let i = 0; i < a.length; i += 4) pushT(a[i], a[i + 1], a[i + 2], a[i + 3]);
     for (let i = 0; i < old.n; i++) pushT(old.t[i], old.p[i], old.q[i], old.s[i]);
     updateStats(true); all();
-  } else if (m.type === 'shift') {                                // spot offset moved by d ticks: move everything we hold the same way
-    const d = m.d; for (let i = 0; i < S.n; i++) S.p[i] -= d;
-    for (const c of cols) { c.lo -= d / binTicks; c.bb -= d; c.ba -= d; if (c.last != null) c.last -= d; }
-    for (const c of recCols) { c.lo -= d / binTicks; c.bb -= d; c.ba -= d; if (c.last != null) c.last -= d; }
-    for (const l of liqs) l.p -= d; if (hv.center !== null) hv.center -= d; if (fv.center !== null) fv.center -= d;
-    all();
+  } else if (m.type === 'offs') {                                 // spot offset timeline (history + live changes)
+    if (m.hist) offHistM = new Map(m.hist);
+    offSegs = m.segs.map(([t, o]) => ({ t, off: o })); offFn = makeOffAt(offHistM, offSegs);
+    if (m.hist) { recReq = ''; dirty.add('heat'); }
   }
   else if (m.type === 'frame') {
     const a = m.trades; for (let i = 0; i < a.length; i += 4) pushT(a[i], a[i + 1], a[i + 2], a[i + 3]);
@@ -143,12 +145,14 @@ function heatWindow() {
 }
 // ---- recorded heatmap history from the laptop recorder (serve.mjs): fetched for the part of the view before this page opened
 let recCols = [], recReq = '', recBusy = false, recOK = location.protocol.startsWith('http');
-const offTicks = () => mk && mk.spot && stat.spot && stat.spot.off != null ? Math.round(stat.spot.off / tick) : 0;
+// spot offset at any time (sent by the engine): recorded book columns are in exchange prices and are converted with it
+let offHistM = new Map(), offSegs = [], offFn = () => 0;
+const offTicks = t => mk && mk.spot ? offFn(t) : 0;
 async function loadRec(t0, t1, n) {
   if (!recOK || recBusy || !mk) return;
   const slot = Math.max(1000, (t1 - t0) / n), a = Math.floor(t0 / slot) * slot, b = Math.ceil(t1 / slot) * slot;
   const qs = `key=${encodeURIComponent(key)}&from=${a}&to=${b}&n=${Math.ceil((b - a) / slot)}`;
-  if (qs === recReq) return; recBusy = true; recReq = qs; const forKey = key, ot = offTicks();
+  if (qs === recReq) return; recBusy = true; recReq = qs; const forKey = key;
   try {
     const r = await fetch('rec/heat?' + qs);
     if (r.status === 404 || !r.ok) { if (forKey === key) recCols = []; }
@@ -157,8 +161,8 @@ async function loadRec(t0, t1, n) {
       for (let o = 0; o + REC <= buf.byteLength; o += REC) {
         const q = new Uint16Array(buf, o + 24, 320), data = new Float32Array(320);
         for (let i = 0; i < 320; i++) data[i] = q[i] ? Math.pow(2, q[i] / 1024) - 1 : 0;
-        const last = dv.getInt32(o + 20, true);
-        out.push({ t: dv.getFloat64(o, true), lo: dv.getInt32(o + 8, true) - ot / binTicks, bb: dv.getInt32(o + 12, true) - ot, ba: dv.getInt32(o + 16, true) - ot, last: last < 0 ? null : last - ot, data, slot });
+        const last = dv.getInt32(o + 20, true), t = dv.getFloat64(o, true), ot = offTicks(t);
+        out.push({ t, lo: dv.getInt32(o + 8, true) - Math.round(ot / binTicks), bb: dv.getInt32(o + 12, true) - ot, ba: dv.getInt32(o + 16, true) - ot, last: last < 0 ? null : last - ot, data, slot });
       }
       if (forKey === key) { recCols = out; dirty.add('heat'); }
     }
@@ -325,13 +329,19 @@ function drawCvd() {
 }
 
 // ---------------------------------------------------------------- footprint
+// Footprint candles only: each candle drawn TradingView-style on the left of its column, its footprint (sell x buy per price
+// row) right beside it. Candle times follow the TradingView clock (core.js candleClock). Candles without footprint data
+// (older than the loaded trades / day files) are not drawn.
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const ctime = t => { if (tf < 3600e3) return hm(t, tf < 6e4); const d = new Date(t + IST); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${hm(t)}`; };
 function drawFp() {
   const P = begin('fp'); if (!P) return; const { x, w, h } = P;
-  if (!candles.length) return waiting(P, 'waiting for trades…');
-  const AX = 62, LAB = 58, TOP = 18, SUMH = 5 * 18 + 6, plotW = w - AX - LAB, ch = h - TOP - SUMH;
+  const fcs = candles.filter(c => c.cells.length);
+  if (!fcs.length) return waiting(P, stat.note && /download|reading/.test(stat.note) ? stat.note + '…' : 'waiting for trades…');
+  const AX = 62, LAB = 50, TOP = 18, SUMH = 4 * 19 + 10, plotW = w - AX - LAB, ch = h - TOP - SUMH;
   const ncol = Math.max(1, Math.floor(plotW / fv.cw)), cw = plotW / ncol;
-  fv.back = Math.max(0, Math.min(candles.length - 1, fv.back));
-  const end = candles.length - Math.round(fv.back), vis = candles.slice(Math.max(0, end - ncol), end);
+  fv.back = Math.max(0, Math.min(fcs.length - 1, fv.back));
+  const end = fcs.length - Math.round(fv.back), vis = fcs.slice(Math.max(0, end - ncol), end);
   let loT, hiT;
   if (fv.auto || fv.center === null) {
     loT = Infinity; hiT = -Infinity; for (const c of vis) { loT = Math.min(loT, c.l); hiT = Math.max(hiT, c.h); }
@@ -340,17 +350,22 @@ function drawFp() {
   } else { loT = fv.center - fv.half; hiT = fv.center + fv.half; }
   const Y = pt => TOP + (hiT - pt) / (hiT - loT) * ch, rowPx = bucketTicks / (hiT - loT) * ch;
   let cmax = 1e-12; for (const c of vis) for (let j = 0; j < c.cells.length; j += 3) cmax = Math.max(cmax, c.cells[j + 1], c.cells[j + 2]);
-  const fs = Math.max(8, Math.min(12, rowPx - 5)), text = rowPx >= 11 && cw >= 70;
+  const CW = Math.max(7, Math.min(28, cw * 0.15)), text = rowPx >= 11 && cw - CW >= 64, fs = Math.max(8, Math.min(12, rowPx - 4));
   x.save(); x.beginPath(); x.rect(0, TOP, w - AX, ch); x.clip();
-  // session profile (left column) over the visible candles
+  // volume at price of the visible candles (left edge)
   const sp = new Map(); for (const c of vis) for (let j = 0; j < c.cells.length; j += 3) sp.set(c.cells[j], (sp.get(c.cells[j]) || 0) + c.cells[j + 1] + c.cells[j + 2]);
   const smax = Math.max(1e-12, ...sp.values()), spoc = valueArea(sp);
-  for (const [b, v] of sp) { const lw = v / smax * (LAB - 10); x.fillStyle = spoc && b === spoc.poc ? rgba(C.OR, 0.85) : 'rgba(184,184,184,0.28)'; x.fillRect(LAB - 3 - lw, Y((b + 1) * bucketTicks) + 0.5, lw, Math.max(1, rowPx - 1)); }
+  for (const [b, v] of sp) { const lw = v / smax * (LAB - 8); x.fillStyle = spoc && b === spoc.poc ? rgba(C.OR, 0.85) : 'rgba(184,184,184,0.28)'; x.fillRect(LAB - 3 - lw, Y((b + 1) * bucketTicks) + 0.5, lw, Math.max(1, rowPx - 1)); }
   const off = ncol - vis.length;
   vis.forEach((c, i) => {
-    const x0 = LAB + (off + i) * cw, cx = x0 + 8, cellL = x0 + 16, cellW = (cw - 20) / 2;
+    const x0 = LAB + (off + i) * cw, cx = x0 + 4 + CW / 2, cellL = x0 + CW + 9, cellW = (cw - CW - 14) / 2;
+    // the candle (TradingView colours), on the same price scale as its footprint
+    const col = c.c >= c.o ? C.G : C.R, yb = Y(Math.max(c.o, c.c) + 1), yb2 = Y(Math.min(c.o, c.c));
+    x.strokeStyle = col; x.lineWidth = Math.max(1, CW / 14); x.beginPath(); x.moveTo(Math.round(cx) + 0.5, Y(c.h + 1)); x.lineTo(Math.round(cx) + 0.5, Y(c.l)); x.stroke(); x.lineWidth = 1;
+    x.fillStyle = col; x.fillRect(cx - CW / 2 + 1, yb, CW - 2, Math.max(2, yb2 - yb));
+    // footprint
     let candleMax = 0; for (let j = 0; j < c.cells.length; j += 3) candleMax = Math.max(candleMax, c.cells[j + 1], c.cells[j + 2]);
-    const imb = imbalances(c.cells, 3, candleMax * 0.05), pk = poc(c.cells);
+    const imb = imbalances(c.cells, 3, candleMax * 0.1), pk = poc(c.cells);
     for (let j = 0; j < c.cells.length; j += 3) {
       const b = c.cells[j], sv = c.cells[j + 1], bv = c.cells[j + 2], y = Y((b + 1) * bucketTicks) + 0.5, hh = Math.max(1, rowPx - 1), f = imb.get(b) || 0;
       if (text) {
@@ -358,42 +373,32 @@ function drawFp() {
         x.fillStyle = f & 1 ? C.G : rgba(C.G, 0.1 + 0.55 * Math.sqrt(bv / cmax)); x.fillRect(cellL + cellW, y, cellW - 1, hh);
         x.font = `${f & 2 ? 'bold ' : ''}${fs}px ${MONO}`; x.textAlign = 'right'; x.fillStyle = f & 2 ? '#fff' : C.TXT; x.fillText(fQ(sv), cellL + cellW - 4, y + hh / 2);
         x.font = `${f & 1 ? 'bold ' : ''}${fs}px ${MONO}`; x.textAlign = 'left'; x.fillStyle = f & 1 ? '#fff' : C.TXT; x.fillText(fQ(bv), cellL + cellW + 3, y + hh / 2);
-      } else {                                                  // zoomed out: bars instead of numbers
+      } else {                                                  // zoomed out: the same footprint as bars (sell left, buy right)
         const ls = sv / cmax * cellW, lbv = bv / cmax * cellW;
         x.fillStyle = f & 2 ? C.R : rgba(C.R, 0.6); x.fillRect(cellL + cellW - ls, y, ls, hh);
         x.fillStyle = f & 1 ? C.G : rgba(C.G, 0.6); x.fillRect(cellL + cellW, y, lbv, hh);
       }
       if (b === pk) { x.strokeStyle = C.OR; x.lineWidth = 1.4; x.strokeRect(cellL - 0.5, y - 0.5, cellW * 2 - 0.5, hh + 1); x.lineWidth = 1; }
     }
-    const col = c.c >= c.o ? C.G : C.R, yb = Y(Math.max(c.o, c.c) + 1), yb2 = Y(Math.min(c.o, c.c));
-    if (!c.cells.length) {                                      // older than the loaded trades: a normal candle (exchange OHLC)
-      const mx = x0 + cw / 2; x.strokeStyle = col; x.beginPath(); x.moveTo(Math.round(mx) + 0.5, Y(c.h + 1)); x.lineTo(Math.round(mx) + 0.5, Y(c.l)); x.stroke();
-      x.fillStyle = col; x.fillRect(mx - cw * 0.22, yb, cw * 0.44, Math.max(2, yb2 - yb));
-    } else {
-      x.strokeStyle = col; x.beginPath(); x.moveTo(cx + 0.5, Y(c.h + 1)); x.lineTo(cx + 0.5, Y(c.l)); x.stroke();
-      x.fillStyle = col; x.fillRect(cx - 3, yb, 7, Math.max(2, yb2 - yb));
-    }
+    x.strokeStyle = C.LINE; x.beginPath(); x.moveTo(Math.round(x0 + cw) + 0.5, TOP); x.lineTo(Math.round(x0 + cw) + 0.5, TOP + ch); x.stroke();
   });
   if (S.n) { const y = Math.round(Y(S.p[S.n - 1] + 0.5)) + 0.5; x.strokeStyle = rgba('#ffffff', 0.35); x.setLineDash([2, 3]); x.beginPath(); x.moveTo(LAB, y); x.lineTo(w - AX, y); x.stroke(); x.setLineDash([]); }
   x.restore();
-  // candle times and summary table
-  x.font = `10px ${SANS}`; x.textAlign = 'center';
+  // candle open time (as on TradingView, shown in IST) and the table underneath
   vis.forEach((c, i) => {
-    const x0 = LAB + (off + i) * cw; x.fillStyle = C.SUB; x.fillText(hm(c.k * tf, tf < 6e4), x0 + cw / 2, 9);
-    if (c.partial && c.cells.length) { x.fillStyle = rgba(C.OR, 0.85); x.fillText(`cells from ${hm(c.cellsFrom)}`, x0 + cw / 2, TOP + 7); }   // footprint covers only part of this candle
-    [[c.d, 1], [c.v, 0], [c.dmin, 1], [c.dmax, 1], [c.cvd, 1]].forEach(([v, sg], j) => {
-      const y = h - SUMH + 6 + j * 18; x.fillStyle = j % 2 ? '#0c0c0c' : '#161616'; x.fillRect(x0 + 1, y, cw - 2, 17);
-      x.font = `11px ${MONO}`;
-      if (v == null) { x.fillStyle = C.MUT; x.fillText('–', x0 + cw / 2, y + 9); }
-      else { x.fillStyle = sg ? (v >= 0 ? C.G : C.R) : C.TXT; x.fillText(sg ? fS(v) : fQ(v), x0 + cw / 2, y + 9); }
-      x.font = `10px ${SANS}`;
+    const x0 = LAB + (off + i) * cw; x.font = `10.5px ${SANS}`; x.textAlign = 'center'; x.fillStyle = C.SUB; x.fillText(ctime(c.t0), x0 + cw / 2, 9);
+    if (c.partial) { x.fillStyle = rgba(C.OR, 0.9); x.fillText(c.cellsFrom ? `footprint from ${hm(c.cellsFrom)}` : 'part of candle', x0 + cw / 2, TOP + 8); }
+    [[c.d, 1], [c.v, 0], [c.v ? c.d / c.v * 100 : 0, 2], [c.cvd, 1]].forEach(([v, kind], j) => {
+      const y = h - SUMH + 8 + j * 19; x.fillStyle = j % 2 ? '#0c0c0c' : '#161616'; x.fillRect(x0 + 1, y, cw - 2, 18);
+      x.font = `11px ${MONO}`; x.fillStyle = kind ? (v >= 0 ? C.G : C.R) : C.TXT;
+      x.fillText(kind === 2 ? (v > 0 ? '+' : '') + v.toFixed(1) + '%' : kind ? fS(v) : fQ(v), x0 + cw / 2, y + 9);
     });
   });
-  x.textAlign = 'left'; x.fillStyle = C.SUB; x.font = `10.5px ${SANS}`; ['Delta', 'Volume', 'Min Δ', 'Max Δ', 'CVD'].forEach((l, j) => x.fillText(l, 6, h - SUMH + 6 + j * 18 + 9));
-  x.strokeStyle = C.LINE; x.beginPath(); x.moveTo(0, h - SUMH + 2.5); x.lineTo(w, h - SUMH + 2.5); x.stroke();
+  x.textAlign = 'left'; x.fillStyle = C.SUB; x.font = `10.5px ${SANS}`; ['Delta', 'Volume', 'Delta %', 'CVD'].forEach((l, j) => x.fillText(l, 4, h - SUMH + 8 + j * 19 + 9));
+  x.strokeStyle = C.LINE; x.beginPath(); x.moveTo(0, h - SUMH + 3.5); x.lineTo(w, h - SUMH + 3.5); x.stroke();
   priceAxis(x, w, ch, loT, hiT, pt => Y(pt + 0.5) - TOP, S.n ? S.p[S.n - 1] : null, S.n && S.s[S.n - 1] > 0 ? C.G : C.R, 0);
-  if (fv.back >= 1) { x.fillStyle = rgba(C.OR, 0.9); x.textAlign = 'left'; x.font = `11px ${SANS}`; x.fillText(`${Math.round(fv.back)} candles back · ⟲ for latest`, LAB + 6, TOP + 10); }
-  $('fpInfo').textContent = ` · ${fmtSpan(tf)} · bucket ${(bucketTicks * tick).toFixed(decimals(bucketTicks * tick))} · sell × buy` + (mk.flow ? ` · flow ${mk.flow}` : '');
+  if (fv.back >= 1) { x.fillStyle = rgba(C.OR, 0.9); x.textAlign = 'left'; x.font = `11px ${SANS}`; x.fillText(`${Math.round(fv.back)} candles back · ⟲ for latest`, LAB + 6, TOP + 22); }
+  $('fpInfo').textContent = ` · ${fmtSpan(tf)} · 4h like ${SESSIONS[session].label} · row ${(bucketTicks * tick).toFixed(decimals(bucketTicks * tick))}` + (mk.flow ? ` · flow ${mk.flow}` : '');
 }
 
 // ---------------------------------------------------------------- DOM ladder
@@ -485,10 +490,16 @@ function buildControls() {
   }
   sel.value = key; sel.onchange = () => open(sel.value);
   const tfs = $('tfs'); tfs.innerHTML = '';
-  for (const [l, v] of [['15s', 15000], ['1m', 60000], ['5m', 300000], ['15m', 900000], ['1h', 3600000], ['4h', 14400000]]) tfs.appendChild(chip(l, v === tf, () => { tf = v; LS.set('tf', v); fv.back = 0; worker.postMessage({ type: 'config', tf: v }); buildControls(); }));
+  for (const [l, v] of [['1m', 60000], ['5m', 300000], ['15m', 900000], ['1h', 3600000], ['4h', 14400000]]) tfs.appendChild(chip(l, v === tf, () => {
+    tf = v; LS.set('tf', v); fv.back = 0; fv.auto = true; const b = rowFor(mk, key, v); bucketTicks = Math.round(b / tick);
+    worker.postMessage({ type: 'config', tf: v, bucket: b }); buildControls(); }));
+  const ss = document.createElement('select'); ss.title = 'Match the 4h candles of your TradingView symbol';
+  for (const [k2, s2] of Object.entries(SESSIONS)) { const o = document.createElement('option'); o.value = k2; o.textContent = '4h like ' + s2.label; ss.appendChild(o); }
+  ss.value = session; ss.onchange = () => { session = ss.value; LS.set('session', session); worker.postMessage({ type: 'config', session }); buildControls(); };
+  tfs.appendChild(ss);
   const bks = $('bks'); bks.innerHTML = '';
   for (const b of mk.buckets) bks.appendChild(chip(b.toFixed(decimals(b)), Math.round(b / tick) === bucketTicks, () => {
-    bucketTicks = Math.round(b / tick); bucketBy[key] = b; LS.set('bucket', bucketBy); fv.auto = true; worker.postMessage({ type: 'config', bucket: b }); buildControls(); }));
+    bucketTicks = Math.round(b / tick); bucketBy[key + '@' + tf] = b; LS.set('bucket', bucketBy); fv.auto = true; worker.postMessage({ type: 'config', bucket: b }); buildControls(); }));
 }
 for (const b of document.querySelectorAll('nav button')) b.onclick = () => {
   document.body.dataset.tab = b.dataset.tab; for (const o of document.querySelectorAll('nav button')) o.classList.toggle('on', o === b);

@@ -26,7 +26,7 @@ jobs:
       - name: Put the web app inside the Android app
         run: |
           mkdir -p android/app/src/main/assets/web
-          cp index.html app.js engine.js core.js feeds.js sw.js manifest.json icon.svg android/app/src/main/assets/web/
+          cp index.html app.js engine.js core.js feeds.js lzma.js sw.js manifest.json icon.svg android/app/src/main/assets/web/
 
       - name: Signing key (from repository secrets)
         env:
